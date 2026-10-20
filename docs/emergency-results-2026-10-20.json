@@ -1,0 +1,81 @@
+{
+  "nodes": 2,
+  "transport": "http3",
+  "scenarios": [
+    {
+      "scenario": "baseline_committed_contract_and_transfers",
+      "status": "passed",
+      "seconds": 0.117
+    },
+    {
+      "scenario": "follower_SIGKILL_three_times_automatic_revival",
+      "status": "passed",
+      "seconds": 2.304
+    },
+    {
+      "scenario": "follower_offline_70_blocks_multibatch_catchup",
+      "status": "passed",
+      "seconds": 7.524
+    },
+    {
+      "scenario": "follower_SIGSTOP_SIGCONT_during_writes",
+      "status": "passed",
+      "seconds": 0.181
+    },
+    {
+      "scenario": "sequencer_freeze_stalls_chain_then_resumes",
+      "status": "passed",
+      "seconds": 1.447
+    },
+    {
+      "scenario": "sequencer_SIGKILL_committed_receipts_survive",
+      "status": "passed",
+      "seconds": 6.833
+    },
+    {
+      "scenario": "both_nodes_killed_follower_first_revival",
+      "status": "passed",
+      "seconds": 1.509
+    },
+    {
+      "scenario": "bidirectional_HTTP3_packet_blackout_and_reconnect",
+      "status": "passed",
+      "seconds": 7.315
+    },
+    {
+      "scenario": "wrong_TLS_trust_rejected_then_repaired",
+      "status": "passed",
+      "seconds": 0.28
+    },
+    {
+      "scenario": "wrong_genesis_fails_closed_then_restores",
+      "status": "passed",
+      "seconds": 0.215
+    },
+    {
+      "scenario": "accepted_unmined_transaction_lost_then_resubmitted_once",
+      "status": "passed",
+      "seconds": 6.888
+    },
+    {
+      "scenario": "sequencer_crash_during_submission_reconcile_and_retry",
+      "status": "passed",
+      "seconds": 6.872
+    },
+    {
+      "scenario": "torn_JSONL_projection_rebuilt_from_durable_database",
+      "status": "passed",
+      "seconds": 0.286
+    },
+    {
+      "scenario": "restart_budget_exhaustion_reports_failure",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "scenario": "downtime_beyond_retention_refuses_unsafe_catchup",
+      "status": "passed",
+      "seconds": 1.814
+    }
+  ]
+}

@@ -1,0 +1,200 @@
+mod common;
+use serde_json::{json, Value};
+use sfc::{
+    framework::Application,
+    indexer::{self, Indexer, Query},
+    node::Node,
+    types::hex_hash,
+};
+use std::{
+    fs::OpenOptions,
+    io::Write,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+fn query(data: &std::path::Path, kind: &str, q: &str) -> Value {
+    indexer::search(
+        data,
+        &Query {
+            kind: kind.into(),
+            q: q.into(),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+}
+
+fn wait(mut condition: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !condition() {
+        assert!(Instant::now() < deadline, "indexer timed out");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn wal_search_restart_and_concurrent_reader_preserve_exact_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let node = Arc::new(Mutex::new(
+        Node::open(config, Application::default()).unwrap(),
+    ));
+    std::fs::create_dir_all(data.join("logs")).unwrap();
+    let mut log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(data.join("logs/node.jsonl"))
+        .unwrap();
+    writeln!(log, "{}", json!({"timestamp_ms":1,"level":"info","event":"recovery_complete","fields":{"message":"worker healthy <script>"}})).unwrap();
+    let tx = common::transfer(0);
+    let hash = hex_hash(&tx.hash);
+    {
+        let mut node = node.lock().unwrap();
+        node.submit(&tx.raw).unwrap();
+        node.produce(1_000_002).unwrap();
+    }
+    let index = Indexer::start(node.clone(), data.clone()).unwrap();
+    wait(|| query(&data, "logs", "")["indexedHeight"] == 1);
+    let logs = query(&data, "logs", "recov");
+    assert_eq!(logs["journalMode"], "wal");
+    assert_eq!(logs["indexedLogs"], 1);
+    assert_eq!(logs["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(query(&data, "logs", "\" OR 1=1 --")["rows"], json!([]));
+    let transaction = query(&data, "transactions", &hash);
+    assert_eq!(transaction["rows"][0]["hash"], hash);
+    assert_eq!(transaction["rows"][0]["receipt"]["success"], true);
+    assert!(query(&data, "receipts", &hash)["rows"][0]["raw"].is_null());
+    assert_eq!(
+        query(&data, "transactions", &format!("{:#x}", common::sender()))["rows"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let block = query(&data, "blocks", "1");
+    assert_eq!(
+        query(&data, "blocks", block["rows"][0]["hash"].as_str().unwrap())["rows"],
+        block["rows"]
+    );
+    let reader = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    reader
+        .execute_batch("BEGIN; SELECT * FROM blocks;")
+        .unwrap();
+    node.lock().unwrap().produce(1_000_003).unwrap();
+    wait(|| query(&data, "blocks", "")["indexedHeight"] == 2);
+    // A WAL reader retains its snapshot while the writer advances.
+    assert_eq!(
+        reader
+            .query_row("SELECT max(height) FROM blocks", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    reader.execute_batch("COMMIT").unwrap();
+    drop(index);
+    writeln!(
+        log,
+        "{}",
+        json!({"timestamp_ms":2,"level":"warn","event":"restart_check"})
+    )
+    .unwrap();
+    let _index = Indexer::start(node, data.clone()).unwrap();
+    wait(|| query(&data, "logs", "")["indexedLogs"] == 2);
+    let all = query(&data, "logs", "");
+    assert_eq!(all["indexedTransactions"], 1);
+    assert_eq!(all["rows"].as_array().unwrap().len(), 2);
+    let page = indexer::search(
+        &data,
+        &Query {
+            before: Some(all["rows"][0]["id"].as_u64().unwrap()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(page["rows"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn explorer_preserves_empty_blocks_and_pages_transactions_without_gaps() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let node = Arc::new(Mutex::new(
+        Node::open(config, Application::default()).unwrap(),
+    ));
+    {
+        let mut n = node.lock().unwrap();
+        n.submit(&common::transfer(0).raw).unwrap();
+        n.submit(&common::transfer(1).raw).unwrap();
+        n.produce(1_000_002).unwrap();
+        n.submit(&common::transfer(2).raw).unwrap();
+        n.produce(1_000_003).unwrap();
+        n.produce(1_000_004).unwrap();
+    }
+    let _index = Indexer::start(node.clone(), data.clone()).unwrap();
+    wait(|| query(&data, "blocks", "3")["indexedHeight"] == 3);
+    assert_eq!(
+        query(&data, "blocks", "3")["rows"][0]["transactionCount"],
+        0
+    );
+    assert_eq!(query(&data, "transactions", "3")["rows"], json!([]));
+    let populated = query(&data, "blocks_with_transactions", "");
+    assert_eq!(
+        populated["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["height"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        vec![2, 1]
+    );
+    assert_eq!(populated["rows"][0]["transactionCount"], 1);
+    assert_eq!(
+        query(&data, "blocks", "1")["rows"][0]["transactionCount"],
+        2
+    );
+    let first = indexer::search(
+        &data,
+        &Query {
+            kind: "transactions".into(),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(first["rows"][0]["transaction"]["nonce"], "2");
+    assert_eq!(first["rows"][0]["transaction"]["valueWei"], "10");
+    assert_eq!(first["rows"][0]["transaction"]["chainId"], "7777");
+    assert_eq!(first["rows"][0]["transaction"]["input"], "0x");
+    // A newer commit must not shift the cursor or duplicate a row on later pages.
+    node.lock()
+        .unwrap()
+        .submit(&common::transfer(3).raw)
+        .unwrap();
+    node.lock().unwrap().produce(1_000_005).unwrap();
+    wait(|| query(&data, "blocks", "4")["indexedHeight"] == 4);
+    let mut next = first["next"].clone();
+    let mut positions = vec![(2, 0)];
+    while !next.is_null() {
+        let page = indexer::search(
+            &data,
+            &Query {
+                kind: "transactions".into(),
+                limit: Some(1),
+                before_height: next["before_height"].as_u64(),
+                before_position: next["before_position"].as_u64().map(|n| n as u32),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for row in page["rows"].as_array().unwrap() {
+            positions.push((
+                row["height"].as_u64().unwrap(),
+                row["position"].as_u64().unwrap(),
+            ));
+        }
+        next = page["next"].clone();
+    }
+    assert_eq!(positions, vec![(2, 0), (1, 1), (1, 0)]);
+}

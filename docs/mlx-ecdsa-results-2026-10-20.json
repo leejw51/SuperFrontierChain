@@ -1,0 +1,328 @@
+{
+  "timestamp_utc": "2026-10-20T04:03:48.490708+00:00",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.15",
+  "mlx": "0.32.4",
+  "numpy": "2.4.4",
+  "device": {
+    "device_name": "Apple M5 Max",
+    "max_recommended_working_set_size": 30150672384,
+    "memory_size": 38654705664,
+    "architecture": "applegpu_g17s",
+    "max_buffer_length": 22613000192,
+    "resource_limit": 499000
+  },
+  "rayon_threads": "18",
+  "fixtures_sha256": "d39430c7b4066c4e603f9496e092ba5258defa2b56e215ab1d10fdb4a7848217",
+  "metal_sha256": "5c43b04d809a225ce30da0db3afec1541a382b66021956009a197a7f43ebd438",
+  "source_sha256": {
+    "experiments/mlx_ecdsa/benchmark.py": "c31907186888f882a0838c220be74f5928d1edd5812fa9aa6bb821a462295d23",
+    "experiments/mlx_ecdsa/recovery.py": "50e4027bd1e5f456239b9697f04fbdc0efe4443cec63ad0e69f7e28843c8bfb6",
+    "experiments/mlx_ecdsa/test_recovery.py": "3bee6de4cd847fc2040a3ca620140126ad88834bcf93574a22c79ed1d7e6aa83",
+    "experiments/mlx_ecdsa/secp256k1.metal": "5c43b04d809a225ce30da0db3afec1541a382b66021956009a197a7f43ebd438",
+    "experiments/mlx_ecdsa/requirements.txt": "d16e3a28cae4f734892a18e1608e0c2cf52bf8bd2c296c4b58a9c2f63c6bb70a",
+    "crates/sfc/examples/ecdsa_oracle.rs": "5cf49fa21c8be224c618b0071ed2eff9bc2bf170721255ee629b16608b70c9f4"
+  },
+  "oracle_sha256": "6922fba508d434676e57f304cda84e580a576cc39f290a926f71bebc99923693",
+  "initial_kernel_setup_seconds": 0.042721042002085596,
+  "validation": {
+    "arithmetic_operations": 2560,
+    "recovery_vectors": 4389,
+    "accepted": 4170,
+    "rejected": 219,
+    "additional_order_duplicate_and_small_batch_checks": true,
+    "seconds": 0.3683212909963913,
+    "passed": true
+  },
+  "gpu_samples": 7,
+  "gpu_iterations_per_sample": 3,
+  "cpu_samples": 7,
+  "cpu_iterations_per_sample": 5,
+  "production_backend": "unchanged_cpu_libsecp256k1",
+  "benchmarks": [
+    {
+      "backend": "libsecp256k1_serial",
+      "batch": 64,
+      "ethereum_rlp_and_keccak_included": false,
+      "input_hex_decode_and_output_hex_included": true,
+      "median_seconds": 0.000923675,
+      "recoveries_per_second": 69288.44019812164,
+      "samples_seconds": [
+        0.0009368916,
+        0.0009568500000000001,
+        0.000923675,
+        0.0009230584,
+        0.00091725,
+        0.00092585,
+        0.00091375
+      ],
+      "workers": 1
+    },
+    {
+      "backend": "libsecp256k1_rayon",
+      "batch": 64,
+      "ethereum_rlp_and_keccak_included": false,
+      "input_hex_decode_and_output_hex_included": true,
+      "median_seconds": 0.0001595166,
+      "recoveries_per_second": 401212.16224518325,
+      "samples_seconds": [
+        0.00022518320000000002,
+        0.0001595166,
+        0.00018324999999999998,
+        0.0001545916,
+        0.00015265,
+        0.00021743320000000002,
+        0.0001570416
+      ],
+      "workers": 18
+    },
+    {
+      "backend": "libsecp256k1_serial",
+      "batch": 256,
+      "ethereum_rlp_and_keccak_included": false,
+      "input_hex_decode_and_output_hex_included": true,
+      "median_seconds": 0.003990624999999999,
+      "recoveries_per_second": 64150.35238841035,
+      "samples_seconds": [
+        0.0038871250000000004,
+        0.0038775,
+        0.003990624999999999,
+        0.0040615916,
+        0.00405085,
+        0.003997175,
+        0.003924325
+      ],
+      "workers": 1
+    },
+    {
+      "backend": "libsecp256k1_rayon",
+      "batch": 256,
+      "ethereum_rlp_and_keccak_included": false,
+      "input_hex_decode_and_output_hex_included": true,
+      "median_seconds": 0.0004357418,
+      "recoveries_per_second": 587503.884180953,
+      "samples_seconds": [
+        0.00045163340000000003,
+        0.00042958320000000005,
+        0.0004357418,
+        0.0004292332,
+        0.00041634999999999996,
+        0.00046344180000000004,
+        0.00045606680000000004
+      ],
+      "workers": 18
+    },
+    {
+      "backend": "libsecp256k1_serial",
+      "batch": 1024,
+      "ethereum_rlp_and_keccak_included": false,
+      "input_hex_decode_and_output_hex_included": true,
+      "median_seconds": 0.0156311666,
+      "recoveries_per_second": 65510.14560870972,
+      "samples_seconds": [
+        0.016680649999999998,
+        0.0157212666,
+        0.0156362416,
+        0.0156311666,
+        0.0155674416,
+        0.0156046582,
+        0.015607916599999999
+      ],
+      "workers": 1
+    },
+    {
+      "backend": "libsecp256k1_rayon",
+      "batch": 1024,
+      "ethereum_rlp_and_keccak_included": false,
+      "input_hex_decode_and_output_hex_included": true,
+      "median_seconds": 0.0014669750000000001,
+      "recoveries_per_second": 698035.0721723273,
+      "samples_seconds": [
+        0.0014916082,
+        0.0014229084,
+        0.00148985,
+        0.0014826000000000002,
+        0.0014669750000000001,
+        0.0014117582,
+        0.0014003750000000001
+      ],
+      "workers": 18
+    },
+    {
+      "backend": "libsecp256k1_serial",
+      "batch": 4096,
+      "ethereum_rlp_and_keccak_included": false,
+      "input_hex_decode_and_output_hex_included": true,
+      "median_seconds": 0.06264375,
+      "recoveries_per_second": 65385.613089893246,
+      "samples_seconds": [
+        0.06271675,
+        0.0626195834,
+        0.06264375,
+        0.06262195000000001,
+        0.0626055666,
+        0.06275505,
+        0.06267729159999999
+      ],
+      "workers": 1
+    },
+    {
+      "backend": "libsecp256k1_rayon",
+      "batch": 4096,
+      "ethereum_rlp_and_keccak_included": false,
+      "input_hex_decode_and_output_hex_included": true,
+      "median_seconds": 0.005088199999999999,
+      "recoveries_per_second": 804999.803466845,
+      "samples_seconds": [
+        0.005164183399999999,
+        0.0051433584,
+        0.0050537916,
+        0.00507375,
+        0.00508295,
+        0.0051247832,
+        0.005088199999999999
+      ],
+      "workers": 18
+    },
+    {
+      "backend": "mlx_prepacked_kernel_and_sync",
+      "batch": 64,
+      "median_seconds": 0.04128363866281385,
+      "recoveries_per_second": 1550.250948631809,
+      "samples_seconds": [
+        0.041246069323581956,
+        0.04128363866281385,
+        0.04129481967538595,
+        0.0413427219997781,
+        0.04123586099982882,
+        0.04147219467752924,
+        0.04119573601443941
+      ],
+      "ethereum_rlp_and_keccak_included": false
+    },
+    {
+      "backend": "mlx_end_to_end",
+      "batch": 64,
+      "median_seconds": 0.04145804165940111,
+      "recoveries_per_second": 1543.7294536435786,
+      "samples_seconds": [
+        0.04144666666009774,
+        0.04145804165940111,
+        0.041484111008079104,
+        0.04142766667064279,
+        0.04141702766840657,
+        0.041480694334798805,
+        0.041542291680040457
+      ],
+      "ethereum_rlp_and_keccak_included": false,
+      "host_packing_included": true,
+      "synchronization_included": true,
+      "output_materialization_and_hex_included": true
+    },
+    {
+      "backend": "mlx_prepacked_kernel_and_sync",
+      "batch": 256,
+      "median_seconds": 0.04029493064930042,
+      "recoveries_per_second": 6353.156485813298,
+      "samples_seconds": [
+        0.040339138999115676,
+        0.04029493064930042,
+        0.04029352799989283,
+        0.040310389013029635,
+        0.04027801400904233,
+        0.04028626399425169,
+        0.04029797232942656
+      ],
+      "ethereum_rlp_and_keccak_included": false
+    },
+    {
+      "backend": "mlx_end_to_end",
+      "batch": 256,
+      "median_seconds": 0.04117461099910239,
+      "recoveries_per_second": 6217.4236450122335,
+      "samples_seconds": [
+        0.04123062500730157,
+        0.04117681933954979,
+        0.04115833332374071,
+        0.04117461099910239,
+        0.04124686100597804,
+        0.04114334700473895,
+        0.04117163899354637
+      ],
+      "ethereum_rlp_and_keccak_included": false,
+      "host_packing_included": true,
+      "synchronization_included": true,
+      "output_materialization_and_hex_included": true
+    },
+    {
+      "backend": "mlx_prepacked_kernel_and_sync",
+      "batch": 1024,
+      "median_seconds": 0.040150972335444145,
+      "recoveries_per_second": 25503.74101640477,
+      "samples_seconds": [
+        0.040161430331257485,
+        0.04014601399345944,
+        0.04011640299965317,
+        0.040150972335444145,
+        0.0401532916779009,
+        0.04023648600559682,
+        0.040122722333762795
+      ],
+      "ethereum_rlp_and_keccak_included": false
+    },
+    {
+      "backend": "mlx_end_to_end",
+      "batch": 1024,
+      "median_seconds": 0.04418748599709943,
+      "recoveries_per_second": 23173.981884084053,
+      "samples_seconds": [
+        0.044462805652680494,
+        0.04427065298659727,
+        0.04413094466629749,
+        0.04401301365578547,
+        0.04418247198918834,
+        0.04424211099588623,
+        0.04418748599709943
+      ],
+      "ethereum_rlp_and_keccak_included": false,
+      "host_packing_included": true,
+      "synchronization_included": true,
+      "output_materialization_and_hex_included": true
+    },
+    {
+      "backend": "mlx_prepacked_kernel_and_sync",
+      "batch": 4096,
+      "median_seconds": 0.03997447200041885,
+      "recoveries_per_second": 102465.39341300324,
+      "samples_seconds": [
+        0.03998652800995236,
+        0.03992284733491639,
+        0.039906472336345665,
+        0.039945875003468245,
+        0.03997869432593385,
+        0.03997447200041885,
+        0.03997750000174468
+      ],
+      "ethereum_rlp_and_keccak_included": false
+    },
+    {
+      "backend": "mlx_end_to_end",
+      "batch": 4096,
+      "median_seconds": 0.055023514005976416,
+      "recoveries_per_second": 74440.90174893428,
+      "samples_seconds": [
+        0.055368444319659225,
+        0.05513129166016976,
+        0.055145861328734704,
+        0.0550224999897182,
+        0.05499383333760003,
+        0.054931749997194856,
+        0.055023514005976416
+      ],
+      "ethereum_rlp_and_keccak_included": false,
+      "host_packing_included": true,
+      "synchronization_included": true,
+      "output_materialization_and_hex_included": true
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "sfc-integration-tests",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/erc20.mjs",
+    "build:dashboard": "node scripts/build_dashboard.mjs"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.0",
+    "esbuild": "0.28.2",
+    "ethers": "6.17.0",
+    "motion": "14.4.0",
+    "solc": "0.8.37",
+    "tailwindcss": "4.3.0",
+    "three": "0.186.1"
+  },
+  "overrides": {
+    "tmp": "0.2.7"
+  }
+}

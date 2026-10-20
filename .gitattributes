@@ -1,0 +1,3 @@
+# Bundled Three.js shaders preserve upstream whitespace inside string literals.
+crates/sfc/static/dashboard.js -whitespace linguist-generated=true
+crates/sfc/static/dashboard.css linguist-generated=true

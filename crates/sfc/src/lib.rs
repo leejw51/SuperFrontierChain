@@ -11,6 +11,7 @@ pub mod config;
 pub mod consensus;
 pub mod ethereum;
 pub mod framework;
+pub mod merkle;
 pub mod network;
 pub mod node;
 pub mod rpc;

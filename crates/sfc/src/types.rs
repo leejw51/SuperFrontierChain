@@ -27,6 +27,8 @@ pub struct Account {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct World {
+    #[serde(skip)]
+    pub merkle_cache: crate::merkle::StateCache,
     pub accounts: BTreeMap<String, Account>,
     pub module_state: BTreeMap<String, String>,
     // The EVM BLOCKHASH window survives pruning and restart.
@@ -35,6 +37,10 @@ pub struct World {
 impl World {
     pub fn root(&self) -> Hash {
         crate::binary::world_hash(self)
+    }
+    pub fn account_proof(&self, address: &str) -> crate::merkle::Proof {
+        self.merkle_cache
+            .prove(self, &crate::merkle::key(0, address.as_bytes()))
     }
 }
 

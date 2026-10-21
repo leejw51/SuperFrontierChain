@@ -132,6 +132,8 @@ impl Store {
         if db.get(b"genesis")?.is_some() {
             ensure!(db.get(b"meta/protocol_version")?.as_deref()==Some(&crate::codec::PROTOCOL_VERSION.to_le_bytes()),
                 "legacy or incompatible chain: preserve this directory and initialize a new protocol-v3 home");
+            ensure!(db.get(b"meta/state_commitment")?.as_deref() == Some(crate::merkle::FORMAT),
+                "incompatible state commitment: preserve this chain directory and initialize a new Merkle trie home; historical block hashes cannot be migrated");
         }
         crate::schema::check_rocksdb(&db)?;
         let store = Self {
@@ -171,6 +173,7 @@ impl Store {
             })?;
             let mut batch = WriteBatch::default();
             batch.put(b"genesis", expected);
+            batch.put(b"meta/state_commitment", crate::merkle::FORMAT);
             batch.put(
                 b"meta/protocol_version",
                 crate::codec::PROTOCOL_VERSION.to_le_bytes(),
@@ -346,6 +349,7 @@ impl Store {
             }
         }
         let metadata = World {
+            merkle_cache: Default::default(),
             accounts: Default::default(),
             module_state: world.module_state.clone(),
             block_hashes: world.block_hashes.clone(),

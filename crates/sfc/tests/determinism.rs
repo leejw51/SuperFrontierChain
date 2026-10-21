@@ -169,13 +169,13 @@ fn block_context_has_stable_commitments_after_pruning_and_restart() {
     assert_eq!(slots["3"], U256::from_be_bytes(parent_hash).to_string());
     assert_eq!(slots["4"], U256::from_be_bytes(boundary_hash).to_string());
     assert!(!slots.contains_key("5")); // Out-of-window hash is zero, canonicalized away.
-                                       // Protocol-v3 typed-segment vectors also detect accidental consensus changes across builds/platforms.
+                                       // Merkle-v1 state and typed-segment block vectors also detect accidental consensus changes across builds/platforms.
     assert_eq!(
         hex_hash(&block.state_root()),
-        "0xa18ea46976f3fd13c47b014e1a2b4c1e564e0bac6d6c8564390a3a95576c94f5"
+        "0x0fd43d5389811f38c938abf1b4e07206a8985ef718518ebce638a4a765d1a4d4"
     );
     assert_eq!(
         hex_hash(&block.hash()),
-        "0x7fec2ecfb03bf08d5e805b78be62f697019944bba8f5620ea5050855ad654d0e"
+        "0x39bf9d9cbb86bd38c5b8accf06c150be60ae73d3e165e3525a04478b73c3d4ce"
     );
 }

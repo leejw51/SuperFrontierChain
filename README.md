@@ -5,6 +5,7 @@
 - [Quickstart](docs/QUICKSTART.md): install prerequisites, start/stop, dashboard, testnet, tests.
 - [Protocol](docs/PROTOCOL.md): HTTP/3, Cap’n Proto RPC, sync rules, Ethereum RPC, limits.
 - [Architecture](docs/ARCHITECTURE.md): execution, storage, journaling, pruning, and operations.
+- [Merkle state trie](docs/MERKLE-TRIE.md): incremental commitments, proofs and chain compatibility.
 - [CPU/GPU/HYBRID verification and measured TPS](docs/VERIFICATION-BACKENDS.md).
 - [GPU latency enhancement](docs/GPU-ENHANCEMENT.md): cooperative recovery and paired network results.
 - [Ethereum compatibility](docs/ETHEREUM.md) and [performance](docs/PERFORMANCE.md).
@@ -132,8 +133,9 @@ legacy GPU worker IPC and supervisor control messages use Cap’n Proto. The def
 native GPU path uses shared Metal buffers without IPC. See
 [protocol v3 formats and tooling](docs/CAPNP-V3.md).
 
-This changes block/state commitments. New default homes are `.sfc-v3`,
-`.sfc-testnet-v3` and `.sfc-stress-v3`. Existing protocol-v1/v2 homes are preserved;
+This changes block/state commitments. Default homes are `.sfc-v3`,
+`.sfc-testnet-v3` and `.sfc-stress-merkle-v1`. The Merkle update requires a fresh
+home if a previous flat-hash chain already exists. Existing homes are preserved;
 never point the new binary at them to continue the old chain. Historical benchmark
 reports in `docs/` retain their original formats and describe protocol v1.
 
@@ -234,19 +236,22 @@ host). Override with `STRESS_INTERVAL=100` for the earlier cadence or
 `STRESS_THREADS=8` to tune a different machine. Intervals must be at least 1 ms;
 shorter intervals can reduce throughput by creating smaller blocks and more writes.
 Requires Rust, the Cap'n Proto compiler and Apple Silicon with Metal; Python, Node/npm and `uv` are not involved; MLX runs in the Rust process. One Rust-supervised node keeps the same chain across rounds and
-restarts in `.sfc-stress-v3/node-0`. Startup prints its actual dashboard, Ethereum RPC,
+restarts in `.sfc-stress-merkle-v1/node-0`. Startup prints its actual dashboard, Ethereum RPC,
 HTTP/3 sync endpoint, TLS certificate, config, database, index, and log locations.
 Run `make stop` in another terminal (or Ctrl-C) to stop the load generator and node.
 Stop preserves chain data and logs. A second concurrent stress runner is rejected.
 GPU verification is explicit; failures do not fall back to CPU. Execution and
 storage still run on CPU. Reported CPU includes all Rust node threads
 (100% means one CPU core), excluding the load generator.
-Results append to `.sfc-stress-v3/results.capnp`; summaries also go to `stress.log`.
+Results append to `.sfc-stress-merkle-v1/results.capnp`; summaries also go to `stress.log`.
 Each round checks committed balances/nonces and GPU counters. Signing runs between
 measured rounds, so the displayed round TPS excludes signing time. This measures
 local commits over binary Capnp RPC (TCP by default); follower replay and emergency scenarios remain separate tests.
-These defaults match the approximately 241,525 TPS SQLite-on benchmark configuration;
-actual throughput varies with chain size, indexing backlog, storage and thermal conditions.
+These load settings match the earlier flat-hash benchmark configuration. With the
+new Merkle commitment, three runs measured a median 201,617 TPS (195,265–243,072);
+see [Merkle validation](docs/MERKLE-TRIE.md). Throughput varies with chain size,
+indexing backlog, storage and thermal conditions. The previous `.sfc-stress-v3`
+chain is preserved and cannot be continued with the changed state-root rules.
 
 SQLite indexing is on by default. Use `make stresstest STRESS_SQLITE=off` to
 exclude the explorer/log index, or `sfc run --config ... --no-indexer` for a node
@@ -267,8 +272,8 @@ index searches.
 make stresstest
 make stop
 make stresstest STRESS_TRANSACTIONS=16384 STRESS_BATCH=1024
-# Also configurable: STRESS_INTERVAL=100 (ms), STRESS_DIR=.sfc-stress-v3,
-# STRESS_REPORT=.sfc-stress-v3/results.capnp
+# Also configurable: STRESS_INTERVAL=100 (ms), STRESS_DIR=.sfc-stress-merkle-v1,
+# STRESS_REPORT=.sfc-stress-merkle-v1/results.capnp
 # Use the same STRESS_DIR with make stop if you override it.
 ```
 
@@ -478,7 +483,7 @@ Python is restricted to supervisor lifecycle/control tooling. All GPU verificati
 transaction generation and benchmark measurements execute in Rust. Legacy `mlx`
 configurations migrate to native MLX; Python GPU-worker execution is removed.
 
-The latest 1,048,576-transfer tests measured median **241,525 TPS with SQLite ON**
+Before the Merkle-trie change, 1,048,576-transfer tests measured median **241,525 TPS with SQLite ON**
 and **249,553 TPS with SQLite OFF** on one node. Two-node durable replay measured
 about 114k–119k TPS on the same machine/GPU. These are transfer benchmarks, not
 evidence of exceeding Hyperliquid’s order-book/BFT performance. See the

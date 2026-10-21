@@ -173,7 +173,7 @@ STRESS_BATCH ?= 4096
 STRESS_INTERVAL ?= 10
 STRESS_THREADS ?= 12
 STRESS_SQLITE ?= on
-STRESS_DIR ?= .sfc-stress-v3
+STRESS_DIR ?= .sfc-stress-merkle-v1
 STRESS_REPORT ?= $(STRESS_DIR)/results.capnp
 .PHONY: stresstest
 stresstest: release

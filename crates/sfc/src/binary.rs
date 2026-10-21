@@ -431,10 +431,7 @@ pub fn world_from_bytes(bytes: &[u8]) -> Result<World> {
     Ok(world)
 }
 pub fn world_hash(world: &World) -> Hash {
-    digest(
-        b"sfc/state/v3/capnp",
-        &world_bytes(world).expect("valid typed world"),
-    )
+    world.merkle_cache.root(world)
 }
 
 /// Presentation boundary only. Storage/index writes keep the typed binary record.

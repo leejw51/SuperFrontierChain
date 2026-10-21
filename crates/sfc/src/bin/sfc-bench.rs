@@ -49,7 +49,7 @@ enum Action {
     Bench(Options),
     /// Stop a managed stress run, optionally also the background service.
     Stop {
-        #[arg(long, default_value = ".sfc-stress-v3")]
+        #[arg(long, default_value = ".sfc-stress-merkle-v1")]
         home: PathBuf,
         #[arg(long)]
         service_home: Option<PathBuf>,
@@ -65,7 +65,7 @@ enum Sqlite {
 struct Options {
     #[arg(long)]
     binary: Option<PathBuf>,
-    #[arg(long, default_value = ".sfc-stress-v3")]
+    #[arg(long, default_value = ".sfc-stress-merkle-v1")]
     home: PathBuf,
     #[arg(long)]
     output: Option<PathBuf>,

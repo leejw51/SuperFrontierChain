@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real supervised nodes: signed transactions, HTTP/3 replay, crash recovery and cleanup."""
 import argparse
-import json
+import sfc_codec as codec
 import pathlib
 import subprocess
 import tempfile
@@ -35,8 +35,8 @@ def main():
                 raise AssertionError('network failed to converge')
 
             until(lambda: all(int(rpc(url, 'eth_blockNumber'), 16) >= 3 for url in urls))
-            fixture = json.loads(subprocess.check_output(
-                ['node', 'scripts/network_fixture.mjs'], cwd=ROOT, text=True, timeout=15))
+            fixture = codec.loads(subprocess.check_output(
+                ['node', 'scripts/network_fixture.mjs'], cwd=ROOT, timeout=15))
             for raw, expected in zip(fixture['raw'], fixture['hashes']):
                 assert rpc(urls[0], 'eth_sendRawTransaction', [raw]) == expected
 
@@ -103,7 +103,7 @@ def main():
                 assert 'restart limit reached' in str(error)
             print(f'PASS: {count} Python-supervised nodes, {len(fixture["raw"])} signed legacy/type-2 transactions, matching blocks/roots/receipts, contract storage/call/estimate, replay/read-only rejection, follower/leader crash recovery, lock, persistent restart, cleanup')
         except BaseException:
-            for log in pathlib.Path(tmp).glob('node-*/node.jsonl'):
+            for log in pathlib.Path(tmp).glob('node-*/node.log'):
                 print(log, log.read_text()[-8000:])
             raise
         finally:

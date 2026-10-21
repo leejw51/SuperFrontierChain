@@ -60,7 +60,7 @@ fn main() {
         serde_json::json!({"benchmark":"signature_verification","transactions":blocks*batch,"tps":(blocks*batch) as f64/start.elapsed().as_secs_f64()})
     );
     let workers = rayon::current_num_threads();
-    let raw: Vec<&[u8]> = transactions.iter().map(|tx| tx.raw.as_slice()).collect();
+    let raw: Vec<&[u8]> = transactions.iter().map(|tx| tx.raw.as_ref()).collect();
     // Warm up the worker pool separately from steady-state measurements.
     std::hint::black_box(sfc::ethereum::decode_batch(&raw[..batch as usize], 7777).unwrap());
     let start = Instant::now();
@@ -76,7 +76,7 @@ fn main() {
         let node_config = config(dir.path());
         std::fs::write(
             &node_config.genesis,
-            serde_json::to_vec(&benchmark_genesis).unwrap(),
+            sfc::codec::to_vec(&benchmark_genesis).unwrap(),
         )
         .unwrap();
         let mut node = sfc::node::Node::open(node_config, Application::default()).unwrap();
@@ -85,7 +85,7 @@ fn main() {
         for (i, txs) in transactions.chunks(batch as usize).enumerate() {
             let tick = Instant::now();
             if parallel {
-                let raw: Vec<&[u8]> = txs.iter().map(|tx| tx.raw.as_slice()).collect();
+                let raw: Vec<&[u8]> = txs.iter().map(|tx| tx.raw.as_ref()).collect();
                 for result in node.submit_batch(&raw).unwrap() {
                     result.unwrap();
                 }

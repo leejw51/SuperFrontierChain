@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use secp256k1::{ecdsa::RecoverableSignature, ecdsa::RecoveryId, Message, SecretKey, SECP256K1};
 use serde::{Deserialize, Serialize};
 use sfc::types::hash;
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 #[path = "../tests/common/mod.rs"]
@@ -26,7 +26,7 @@ fn cpu_seconds() -> Result<f64> {
 }
 
 fn emit(value: serde_json::Value) -> Result<()> {
-    println!("{value}");
+    sfc::codec::write_record(&mut std::io::stdout().lock(), &sfc::codec::to_vec(&value)?)?;
     std::io::stdout().flush()?;
     Ok(())
 }
@@ -37,8 +37,9 @@ fn load_server(cases: &[Case]) -> Result<()> {
     let run = || batch.par_iter().map(recover).collect::<Vec<_>>();
     ensure!(run() == expected_all[..4096], "CPU warmup mismatch");
     emit(serde_json::json!({"ready":true,"workers":rayon::current_num_threads()}))?;
-    for line in std::io::stdin().lock().lines() {
-        let request: serde_json::Value = serde_json::from_str(&line?)?;
+    let mut input = std::io::stdin().lock();
+    while let Some(bytes) = sfc::codec::read_record(&mut input)? {
+        let request: serde_json::Value = sfc::codec::from_slice(&bytes)?;
         let iterations = request["iterations"]
             .as_u64()
             .context("missing iterations")?;
@@ -108,8 +109,9 @@ fn evm_server() -> Result<()> {
     };
     let expected = run()?.0.hash();
     emit(serde_json::json!({"ready":true,"transactions_per_execution":512}))?;
-    for line in std::io::stdin().lock().lines() {
-        let request: serde_json::Value = serde_json::from_str(&line?)?;
+    let mut input = std::io::stdin().lock();
+    while let Some(bytes) = sfc::codec::read_record(&mut input)? {
+        let request: serde_json::Value = sfc::codec::from_slice(&bytes)?;
         let seconds = request["seconds"].as_f64().unwrap_or(0.0);
         let blocks = request["blocks"].as_u64().unwrap_or(0);
         ensure!(
@@ -305,19 +307,19 @@ fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("load-server") => {
-            let cases: Vec<Case> = serde_json::from_slice(&std::fs::read(args.get(2).context("missing fixture path")?)?)?;
+            let cases: Vec<Case> = serde_json::from_value(sfc::codec::from_slice::<serde_json::Value>(&std::fs::read(args.get(2).context("missing fixture path")?)?)?)?;
             ensure!(cases.len() >= 4096, "insufficient fixtures");
             load_server(&cases)?;
         }
         Some("evm-server") => evm_server()?,
         Some("generate") => {
             let count = args.get(2).context("missing count")?.parse()?;
-            println!("{}", serde_json::to_string(&generate(count)?)?);
+            std::io::stdout().write_all(&sfc::codec::to_vec(&serde_json::to_value(generate(count)?)?)?)?;
         }
         Some("bench") => {
-            let cases: Vec<Case> = serde_json::from_slice(&std::fs::read(
+            let cases: Vec<Case> = serde_json::from_value(sfc::codec::from_slice::<serde_json::Value>(&std::fs::read(
                 args.get(2).context("missing fixture path")?,
-            )?)?;
+            )?)?)?;
             let mut report = Vec::new();
             for count in [64, 256, 1024, 4096] {
                 ensure!(cases.len() >= count, "insufficient fixtures");
@@ -352,9 +354,9 @@ fn main() -> Result<()> {
                     }));
                 }
             }
-            println!("{}", serde_json::to_string(&report)?);
+            std::io::stdout().write_all(&sfc::codec::to_vec(&serde_json::to_value(&report)?)?)?;
         }
-        _ => bail!("usage: ecdsa_oracle generate COUNT | bench FIXTURE.json | load-server FIXTURE.json | evm-server"),
+        _ => bail!("usage: ecdsa_oracle generate COUNT | bench FIXTURE.capnp | load-server FIXTURE.capnp | evm-server"),
     }
     Ok(())
 }

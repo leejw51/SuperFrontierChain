@@ -20,7 +20,7 @@ fn rpc_contract_callers_are_simulated_without_committing_or_relaxing_transaction
     node.submit(&signed(0, None, 0, &init, 100_000, 7777))
         .unwrap();
     let block = node.produce(genesis().timestamp + 1).unwrap();
-    let address: Address = block.receipts[0]
+    let address: Address = block.receipts().unwrap()[0]
         .contract_address
         .as_ref()
         .unwrap()
@@ -50,7 +50,7 @@ fn rpc_contract_callers_are_simulated_without_committing_or_relaxing_transaction
         let error = ethereum::execute(
             &mut db,
             env.clone(),
-            node.context(block.height, block.timestamp),
+            node.context(block.height(), block.timestamp()),
             commit,
         )
         .unwrap_err();
@@ -79,37 +79,33 @@ fn transfer_is_durable_and_replay_is_rejected() {
         )
         .unwrap();
     assert_eq!(balance(&world, Address::repeat_byte(0x22)), U256::from(10));
-    assert_eq!(block.receipts[0].gas_used, 21_000);
+    assert_eq!(block.receipts().unwrap()[0].gas_used, 21_000);
     assert!(app
         .execute_block(
             &block,
             &world,
-            block.timestamp + 1,
+            block.timestamp() + 1,
             genesis.gas_limit,
             &[tx]
         )
         .is_err());
     store.commit(&block, &world).unwrap();
-    drop(store); // Simulated crash before JSONL projection.
+    drop(store); // Simulated crash before Cap’n Proto projection.
     let store = Store::open(dir.path(), Retention::default(), &genesis).unwrap();
     assert_eq!(store.head().unwrap(), block);
     assert_eq!(store.world().unwrap(), world);
     let path = dir
         .path()
-        .join(format!("history/{:020}.jsonl", block.timestamp / 3600));
+        .join(format!("history/{:020}.capnp", block.timestamp() / 3600));
     assert!(path.exists());
     drop(store);
     std::fs::write(&path, b"torn").unwrap();
     let _store = Store::open(dir.path(), Retention::default(), &genesis).unwrap();
     assert_eq!(
-        serde_json::from_str::<sfc::types::Block>(
-            std::fs::read_to_string(path)
-                .unwrap()
-                .lines()
-                .last()
-                .unwrap()
-        )
-        .unwrap(),
+        sfc::codec::read_all::<sfc::types::Block>(&mut std::fs::File::open(path).unwrap())
+            .unwrap()
+            .pop()
+            .unwrap(),
         block
     );
 }
@@ -135,7 +131,7 @@ fn prune_by_time_preserves_state_boundary_and_archive() {
             .execute_block(
                 &first,
                 &world,
-                first.timestamp + WEEK,
+                first.timestamp() + WEEK,
                 genesis.gas_limit,
                 &[],
             )
@@ -147,7 +143,7 @@ fn prune_by_time_preserves_state_boundary_and_archive() {
             .execute_block(
                 &second,
                 &world,
-                second.timestamp + 1,
+                second.timestamp() + 1,
                 genesis.gas_limit,
                 &[],
             )
@@ -178,12 +174,16 @@ fn invalid_block_cannot_change_state_and_genesis_is_bound() {
         .execute_block(
             &head,
             &world,
-            head.timestamp + 1,
+            head.timestamp() + 1,
             genesis.gas_limit,
             &[transfer(0)],
         )
         .unwrap();
-    block.parent_hash = [7; 32];
+    block = sfc::types::Block::build(sfc::types::BlockDraft {
+        parent_hash: [7; 32],
+        ..block_draft(&block)
+    })
+    .unwrap();
     assert!(store.commit(&block, &next).is_err());
     assert_eq!(store.world().unwrap(), world);
     assert_eq!(store.head().unwrap(), head);
@@ -196,7 +196,7 @@ fn invalid_block_cannot_change_state_and_genesis_is_bound() {
 fn malformed_and_wrong_chain_transactions_rejected() {
     let raw = transfer(0).raw;
     assert!(Transaction::decode(&raw, 1).is_err());
-    let mut trailing = raw.clone();
+    let mut trailing = raw.to_vec();
     trailing.push(0);
     assert!(Transaction::decode(&trailing, 7777).is_err());
     for bytes in [vec![], vec![0], vec![2], vec![0xff; 50], vec![0xf8, 0]] {
@@ -236,7 +236,7 @@ fn evm_deploy_call_revert_and_storage() {
             &[tx],
         )
         .unwrap();
-    let address: Address = block.receipts[0]
+    let address: Address = block.receipts().unwrap()[0]
         .contract_address
         .as_ref()
         .unwrap()
@@ -258,12 +258,12 @@ fn evm_deploy_call_revert_and_storage() {
         .execute_block(
             &block,
             &world,
-            block.timestamp + 1,
+            block.timestamp() + 1,
             genesis.gas_limit,
             &[tx],
         )
         .unwrap();
-    assert!(block.receipts[0].success);
+    assert!(block.receipts().unwrap()[0].success);
     assert_eq!(world.accounts[&format!("{address:#x}")].storage["0"], "42");
     let mut db = ethereum::load_db(&world).unwrap();
     let result = ethereum::execute(
@@ -341,31 +341,21 @@ fn queued_execution_matches_strict_import_and_rejects_tampering() {
     leader.submit(&transfer(0).raw).unwrap();
     assert_eq!(leader.pending_len(), 25);
     let block = leader.produce(genesis().timestamp + 1).unwrap();
-    assert_eq!(block.transactions.len(), 25);
+    assert_eq!(block.transaction_count(), 25);
     assert_eq!(leader.pending_len(), 0);
-    let wire = sfc::network::WireBlock {
-        chain_id: block.chain_id,
-        height: block.height,
-        timestamp: block.timestamp,
-        parent_hash: block.parent_hash,
-        state_root: block.state_root,
-        transactions: block
-            .transactions
-            .iter()
-            .map(|raw| hex::decode(&raw[2..]).unwrap())
-            .collect(),
-    };
-    let mut corrupt = wire.clone();
+    let mut corrupt = block_draft(&block);
     corrupt.state_root = [0; 32];
-    assert!(follower.import(corrupt).is_err());
-    assert_eq!(follower.head().height, 0);
-    follower.import(wire).unwrap();
+    assert!(follower
+        .import_encoded(sfc::types::Block::build(corrupt).unwrap())
+        .is_err());
+    assert_eq!(follower.head().height(), 0);
+    follower.import_encoded(block).unwrap();
     assert_eq!(follower.head(), leader.head());
     assert_eq!(follower.world().unwrap(), leader.world().unwrap());
     assert!(follower.produce(genesis().timestamp + 2).is_err());
 }
 #[test]
-fn hourly_jsonl_rotation_prunes_even_when_hour_was_sparse() {
+fn hourly_capnp_rotation_prunes_even_when_hour_was_sparse() {
     let dir = tempdir().unwrap();
     let genesis = genesis();
     let store = Store::open(dir.path(), Retention::default(), &genesis).unwrap();
@@ -386,7 +376,7 @@ fn hourly_jsonl_rotation_prunes_even_when_hour_was_sparse() {
     }
     assert!(!dir
         .path()
-        .join(format!("history/{old_hour:020}.jsonl"))
+        .join(format!("history/{old_hour:020}.capnp"))
         .exists());
 }
 #[test]
@@ -412,7 +402,7 @@ fn pruning_removes_receipt_index() {
         .execute_block(
             &first,
             &world,
-            first.timestamp + WEEK + 1,
+            first.timestamp() + WEEK + 1,
             genesis.gas_limit,
             &[],
         )

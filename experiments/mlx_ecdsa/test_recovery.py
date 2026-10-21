@@ -1,6 +1,9 @@
 """Differential arithmetic/recovery checks; requires the actual Apple GPU."""
 import argparse
-import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+import sfc_codec as codec
 import random
 import time
 import mlx.core as mx
@@ -190,6 +193,6 @@ def run(cases, gpu=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--fixtures', default='target/mlx-ecdsa/fixtures.json')
+    parser.add_argument('--fixtures', default='target/mlx-ecdsa/fixtures.capnp')
     args = parser.parse_args()
-    print(json.dumps(run(json.load(open(args.fixtures)))))
+    print(run(codec.read(args.fixtures)))

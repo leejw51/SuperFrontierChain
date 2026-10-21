@@ -4,7 +4,10 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
-import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+import sfc_codec as codec
 import os
 from pathlib import Path
 import platform
@@ -40,7 +43,7 @@ def measure(function, count, backend, samples, iterations, expected=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--oracle', type=Path, default=ROOT/'target/release/examples/ecdsa_oracle')
-    parser.add_argument('--output', type=Path, default=ROOT/'target/mlx-ecdsa/results.json')
+    parser.add_argument('--output', type=Path, default=ROOT/'target/mlx-ecdsa/results.capnp')
     parser.add_argument('--samples', type=int, default=7)
     parser.add_argument('--iterations', type=int, default=3)
     parser.add_argument('--tests-only', action='store_true')
@@ -48,10 +51,10 @@ def main():
     if args.samples < 1 or args.iterations < 1:
         parser.error('samples and iterations must be positive')
     args.oracle = args.oracle.resolve()
-    fixture_path = ROOT/'target/mlx-ecdsa/fixtures.json'
+    fixture_path = ROOT/'target/mlx-ecdsa/fixtures.capnp'
     fixture_path.parent.mkdir(parents=True, exist_ok=True)
     fixture_path.write_bytes(subprocess.check_output([args.oracle, 'generate', '4096']))
-    cases = json.loads(fixture_path.read_bytes())
+    cases = codec.loads(fixture_path.read_bytes())
     start = time.perf_counter()
     gpu = Recovery()
     # Compilation and initial execution are measured separately, outside steady state.
@@ -80,7 +83,7 @@ def main():
     if not args.tests_only:
         # CPU baseline includes hex input decoding, low-S/parity validation,
         # recovery and serialized public-key hex output, matching the GPU API.
-        report['benchmarks'].extend(json.loads(subprocess.check_output(
+        report['benchmarks'].extend(codec.loads(subprocess.check_output(
             [args.oracle, 'bench', fixture_path])))
         for count in [64, 256, 1024, 4096]:
             batch = cases[:count]
@@ -104,7 +107,7 @@ def main():
             print(f'GPU {count}: {row["recoveries_per_second"]:,.0f} recoveries/s, '
                   f'{row["median_seconds"]*1000:.3f} ms end-to-end', flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2)+'\n')
+    codec.write(args.output, report)
     print(f'Report: {args.output}', flush=True)
 
 

@@ -1,8 +1,8 @@
-//! One structured JSON object per stderr line. No transaction bodies or keys.
+//! Cap’n Proto structured events; human-readable stderr diagnostics.
 use serde_json::{json, Value};
 use std::{
     fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Seek, SeekFrom, Write},
     path::Path,
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
@@ -16,34 +16,36 @@ pub fn initialize(data: &Path) -> anyhow::Result<()> {
         .create(true)
         .read(true)
         .append(true)
-        .open(data.join("logs/node.jsonl"))?;
+        .open(data.join("logs/node.capnp"))?;
     repair_tail(&mut file)?;
     FILE.set(Mutex::new(file))
         .map_err(|_| anyhow::anyhow!("logging already initialized"))?;
     Ok(())
 }
 
-// A killed writer may leave a partial JSON record. Preserve every complete line
-// before appending; otherwise the first new record would join the torn tail.
-fn repair_tail(file: &mut File) -> std::io::Result<()> {
-    let length = file.metadata()?.len();
-    let mut cursor = length;
-    let mut buffer = [0u8; 4096];
-    while cursor > 0 {
-        let start = cursor.saturating_sub(buffer.len() as u64);
-        let size = (cursor - start) as usize;
-        file.seek(SeekFrom::Start(start))?;
-        file.read_exact(&mut buffer[..size])?;
-        if let Some(index) = buffer[..size].iter().rposition(|&byte| byte == b'\n') {
-            let end = start + index as u64 + 1;
-            if end != length {
-                file.set_len(end)?;
+// A killed writer may leave a partial frame. Preserve complete records.
+fn repair_tail(file: &mut File) -> anyhow::Result<()> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut end = 0;
+    loop {
+        match crate::codec::read_record(file) {
+            Ok(Some(bytes)) => {
+                let _: Value = crate::codec::from_slice(&bytes)?;
+                end = file.stream_position()?;
             }
-            return Ok(());
+            Ok(None) => break,
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::UnexpectedEof) =>
+            {
+                file.set_len(end)?;
+                break;
+            }
+            Err(error) => return Err(error),
         }
-        cursor = start;
     }
-    file.set_len(0)
+    Ok(())
 }
 
 fn record(level: &str, event: &str, fields: Value) -> Value {
@@ -52,15 +54,18 @@ fn record(level: &str, event: &str, fields: Value) -> Value {
 }
 
 pub fn event(level: &str, name: &str, fields: Value) {
-    if let Ok(mut bytes) = serde_json::to_vec(&record(level, name, fields)) {
-        bytes.push(b'\n');
-        // Hold stderr's lock across the entire record to avoid interleaving threads.
-        let _ = std::io::stderr().lock().write_all(&bytes);
-        if let Some(file) = FILE.get() {
-            if let Ok(mut file) = file.lock() {
-                if let Err(error) = file.write_all(&bytes) {
-                    eprintln!("structured log write failed: {error}");
-                }
+    let record = record(level, name, fields);
+    let _ = writeln!(
+        std::io::stderr().lock(),
+        "[{level}] {name} {:?}",
+        record["fields"]
+    );
+    if let Some(file) = FILE.get() {
+        if let Ok(mut file) = file.lock() {
+            if let Err(error) = crate::codec::to_vec(&record)
+                .and_then(|bytes| crate::codec::write_record(&mut *file, &bytes))
+            {
+                eprintln!("structured log write failed: {error}");
             }
         }
     }
@@ -83,23 +88,23 @@ mod tests {
     #[test]
     fn crash_tail_preserves_complete_records() {
         let mut file = tempfile::tempfile().unwrap();
-        file.write_all(b"{\"ok\":1}\n{\"torn\":").unwrap();
+        crate::codec::write_record(&mut file, &crate::codec::to_vec(&json!({"ok":1})).unwrap())
+            .unwrap();
+        file.write_all(&[32, 0, 0]).unwrap();
         repair_tail(&mut file).unwrap();
         file.rewind().unwrap();
-        let mut text = String::new();
-        file.read_to_string(&mut text).unwrap();
-        assert_eq!(text, "{\"ok\":1}\n");
+        let records: Vec<Value> = crate::codec::read_all(&mut file).unwrap();
+        assert_eq!(records, vec![json!({"ok":1})]);
     }
     #[test]
-    fn multiline_fields_remain_one_json_line() {
+    fn multiline_fields_roundtrip_in_binary_record() {
         let value = record(
             "warn",
             "sync_retry",
             json!({"message":"first\nsecond\"quoted"}),
         );
-        let encoded = serde_json::to_string(&value).unwrap();
-        assert!(!encoded.contains('\n'));
-        let parsed: Value = serde_json::from_str(&encoded).unwrap();
+        let encoded = crate::codec::to_vec(&value).unwrap();
+        let parsed: Value = crate::codec::from_slice(&encoded).unwrap();
         assert_eq!(parsed["fields"]["message"], "first\nsecond\"quoted");
         assert_eq!(parsed["event"], "sync_retry");
         assert!(parsed["timestamp_ms"].as_u64().unwrap() > 0);

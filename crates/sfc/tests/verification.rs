@@ -4,14 +4,26 @@ use sfc::{
     ethereum::Transaction,
     framework::Application,
     node::Node,
-    verification::{Backend, VerificationConfig, Verifier},
+    verification::{Backend, GpuRuntime, VerificationConfig, Verifier},
 };
 
 #[test]
 fn defaults_gpu_and_explicit_cpu_needs_no_python() {
     assert_eq!(VerificationConfig::default().backend, Backend::Gpu);
     assert_eq!(
-        serde_json::from_str::<VerificationConfig>("{}")
+        VerificationConfig::default().gpu_runtime,
+        GpuRuntime::MlxNative
+    );
+    for runtime in [GpuRuntime::Metal, GpuRuntime::MlxNative] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut configuration = config(dir.path());
+        configuration.verification.gpu_runtime = runtime;
+        let bytes = sfc::codec::to_vec(&configuration).unwrap();
+        let decoded: sfc::config::Config = sfc::codec::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.verification.gpu_runtime, runtime);
+    }
+    assert_eq!(
+        serde_json::from_value::<VerificationConfig>(serde_json::json!({}))
             .unwrap()
             .backend,
         Backend::Gpu
@@ -23,23 +35,18 @@ fn defaults_gpu_and_explicit_cpu_needs_no_python() {
     })
     .unwrap();
     assert!(cpu.decode_batch::<Vec<u8>>(&[], 7777).unwrap().is_empty());
-    let raw = vec![transfer(0).raw, vec![0], transfer(1).raw];
+    let raw = vec![transfer(0).raw, vec![0].into(), transfer(1).raw];
     let decoded = cpu.decode_batch(&raw, 7777).unwrap();
     assert!(decoded[0].is_ok() && decoded[1].is_err() && decoded[2].is_ok());
     assert_eq!(cpu.status().unwrap()["cpu_records"], 2);
     assert!(cpu.status().unwrap()["gpu_worker_pid"].is_null());
-    assert!(Verifier::new(VerificationConfig {
-        python: "/missing/python".into(),
-        ..Default::default()
-    })
-    .is_err());
 }
 
 #[test]
-#[ignore = "requires Apple Metal and make mlx-setup"]
+#[ignore = "requires Apple Metal; native Rust runtime, no Python"]
 fn gpu_hybrid_match_cpu_order_errors_state_and_replay() {
     let mut raw: Vec<_> = (0..4096).map(|i| transfer(i).raw).collect();
-    raw[17] = vec![0];
+    raw[17] = vec![0].into();
     raw[4095] = raw[0].clone();
     let expected: Vec<_> = raw
         .iter()
@@ -106,52 +113,59 @@ fn gpu_hybrid_match_cpu_order_errors_state_and_replay() {
             certificate: dir.path().join("unused.der"),
         });
         let mut follower = Node::open(configuration, Application::default()).unwrap();
-        follower
-            .import(sfc::network::WireBlock {
-                chain_id: expected.chain_id,
-                height: expected.height,
-                timestamp: expected.timestamp,
-                parent_hash: expected.parent_hash,
-                state_root: expected.state_root,
-                transactions: raw.clone(),
-            })
-            .unwrap();
+        follower.import_encoded(expected.clone()).unwrap();
         assert_eq!(follower.head(), &expected);
         assert_eq!(follower.world().unwrap(), cpu.world().unwrap());
     }
 }
 
-#[cfg(unix)]
 #[test]
-fn gpu_protocol_errors_fail_closed_and_worker_is_replaced() {
-    let key = secp256k1::PublicKey::from_secret_key(
-        secp256k1::SECP256K1,
-        &secp256k1::SecretKey::from_slice(&[1; 32]).unwrap(),
-    );
-    for response in [
-        "{'id': request['id']+1, 'keys': [key]}",
-        "{'id': request['id'], 'keys': []}",
-        "{'id': request['id'], 'keys': ['04'+'00'*64]}",
-    ] {
-        let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("worker.py");
-        std::fs::write(&script, format!(
-            "import json,sys\nkey='{}'\nprint(json.dumps({{'ready':True,'protocol':1}}),flush=True)\nrequest=json.loads(sys.stdin.readline())\nprint(json.dumps({{'id':request['id'],'keys':[key,None]}}),flush=True)\nfor line in sys.stdin:\n request=json.loads(line)\n print(json.dumps({}),flush=True)\n",
-            hex::encode(key.serialize_uncompressed()), response,
-        )).unwrap();
-        let verifier = Verifier::new(VerificationConfig {
-            python: "/usr/bin/python3".into(),
-            worker: script,
-            timeout_seconds: 2,
-            ..Default::default()
-        })
+fn legacy_python_runtime_migrates_to_native_without_executing_paths() {
+    use sfc::{codec, config::Config, runtime_capnp as wire};
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = config(dir.path());
+    config.verification.python = "/must/not/execute/python".into();
+    config.verification.worker = "/must/not/execute/worker.py".into();
+    let bytes = codec::to_vec(&config).unwrap();
+    let mut slice = bytes.as_slice();
+    let reader =
+        capnp::serialize::read_message_from_flat_slice(&mut slice, Default::default()).unwrap();
+    let mut message = capnp::message::Builder::new_default();
+    message
+        .set_root(reader.get_root::<wire::record::Reader>().unwrap())
         .unwrap();
-        for _ in 0..2 {
-            assert!(verifier.decode_batch(&[transfer(0).raw], 7777).is_err());
-            let status = verifier.status().unwrap();
-            assert!(status["gpu_worker_pid"].is_null());
-            assert_eq!(status["cpu_records"], 0);
-            assert_eq!(status["gpu_records"], 0);
-        }
-    }
+    let wire::record::Which::Config(config_builder) = message
+        .get_root::<wire::record::Builder>()
+        .unwrap()
+        .which()
+        .unwrap()
+    else {
+        panic!("expected config");
+    };
+    config_builder
+        .unwrap()
+        .get_verification()
+        .unwrap()
+        .set_gpu_runtime(wire::GpuRuntime::Mlx);
+    let path = dir.path().join("legacy.capnp");
+    let old = capnp::serialize::write_message_to_words(&message);
+    std::fs::write(&path, &old).unwrap();
+    let upgraded: Config = codec::upgrade_file(&path).unwrap();
+    assert_eq!(upgraded.verification.gpu_runtime, GpuRuntime::MlxNative);
+    assert_eq!(upgraded.verification.python, config.verification.python);
+    assert_ne!(std::fs::read(&path).unwrap(), old);
+    let status = Verifier::new(upgraded.verification)
+        .unwrap()
+        .status()
+        .unwrap();
+    assert!(status["gpu_worker_pid"].is_null());
+    assert_eq!(status["gpu_runtime"], "mlx-native");
+    let legacy: VerificationConfig =
+        serde_json::from_value(serde_json::json!({"gpu_runtime":"mlx"})).unwrap();
+    assert_eq!(legacy.gpu_runtime, GpuRuntime::MlxNative);
+    use clap::ValueEnum;
+    assert_eq!(
+        GpuRuntime::from_str("mlx", false).unwrap(),
+        GpuRuntime::MlxNative
+    );
 }

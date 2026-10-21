@@ -81,8 +81,8 @@ pub fn balance(world: &sfc::types::World, address: Address) -> U256 {
         .unwrap()
 }
 pub fn config(path: &std::path::Path) -> sfc::config::Config {
-    let genesis_path = path.join("genesis.json");
-    std::fs::write(&genesis_path, serde_json::to_vec(&genesis()).unwrap()).unwrap();
+    let genesis_path = path.join("genesis.capnp");
+    std::fs::write(&genesis_path, sfc::codec::to_vec(&genesis()).unwrap()).unwrap();
     sfc::config::Config {
         verification: sfc::verification::VerificationConfig {
             backend: sfc::verification::Backend::Cpu,
@@ -101,5 +101,23 @@ pub fn config(path: &std::path::Path) -> sfc::config::Config {
         max_block_transactions: 4096,
         retention: sfc::config::Retention::default(),
         development: true,
+    }
+}
+
+// Materialize only when a test deliberately constructs an altered block.
+pub fn block_draft(b: &sfc::types::Block) -> sfc::types::BlockDraft {
+    sfc::types::BlockDraft {
+        chain_id: b.chain_id(),
+        height: b.height(),
+        timestamp: b.timestamp(),
+        parent_hash: b.parent_hash(),
+        state_root: b.state_root(),
+        transactions: b
+            .transactions()
+            .unwrap()
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        receipts: b.receipts().unwrap(),
     }
 }

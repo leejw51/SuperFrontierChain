@@ -32,10 +32,12 @@ fn archive_to_pruned_cleans_multiple_batches_and_repairs_projection() {
     assert_eq!(store.world().unwrap().root(), world.root());
     let mut lines = 0;
     for entry in std::fs::read_dir(dir.path().join("history")).unwrap() {
-        let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
-        for line in text.lines() {
-            let block: sfc::types::Block = serde_json::from_str(line).unwrap();
-            assert!(block.height >= 518);
+        for block in sfc::codec::read_all::<sfc::types::Block>(
+            &mut std::fs::File::open(entry.unwrap().path()).unwrap(),
+        )
+        .unwrap()
+        {
+            assert!(block.height() >= 518);
             lines += 1;
         }
     }
@@ -55,4 +57,42 @@ fn zero_retention_is_rejected_by_storage() {
         &common::genesis()
     )
     .is_err());
+}
+
+#[test]
+fn history_writer_rolls_hours_and_prunes_without_losing_current_segment() {
+    let dir = tempfile::tempdir().unwrap();
+    let genesis = common::genesis();
+    let store = Store::open(dir.path(), Retention::Pruned { seconds: 2 }, &genesis).unwrap();
+    let mut head = store.head().unwrap();
+    let mut world = store.world().unwrap();
+    let next_hour = (genesis.timestamp / 3600 + 1) * 3600;
+    for timestamp in [genesis.timestamp + 1, next_hour, next_hour + 3] {
+        let (next, state) = Application::default()
+            .execute_block(&head, &world, timestamp, genesis.gas_limit, &[])
+            .unwrap();
+        store.commit(&next, &state).unwrap();
+        store.maintain().unwrap();
+        store.maintain().unwrap(); // Idempotent: no duplicate frame.
+        head = next;
+        world = state;
+    }
+    drop(store);
+    let paths: Vec<_> = std::fs::read_dir(dir.path().join("history"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(paths.len(), 1);
+    let blocks: Vec<sfc::types::Block> =
+        sfc::codec::read_all(&mut std::fs::File::open(&paths[0]).unwrap()).unwrap();
+    assert_eq!(
+        blocks.iter().map(|b| b.height()).collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+    let store = Store::open(dir.path(), Retention::Pruned { seconds: 2 }, &genesis).unwrap();
+    assert_eq!(store.head().unwrap(), head);
+    assert_eq!(store.world().unwrap(), world);
+    let blocks: Vec<sfc::types::Block> =
+        sfc::codec::read_all(&mut std::fs::File::open(&paths[0]).unwrap()).unwrap();
+    assert_eq!(blocks, vec![head]);
 }

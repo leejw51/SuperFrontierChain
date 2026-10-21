@@ -9,25 +9,221 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
+type DecodedBatch = Vec<Result<crate::ethereum::Transaction>>;
+type BatchAdmission = Vec<Result<crate::types::Hash>>;
+struct AdmissionJob {
+    decoded: tokio::task::JoinHandle<Result<DecodedBatch>>,
+    reply: tokio::sync::oneshot::Sender<Result<BatchAdmission>>,
+}
 struct PeerServer {
     node: Arc<Mutex<Node>>,
+    chain: u64,
+    accepts_transactions: bool,
+    verifier: Arc<crate::verification::Verifier>,
+    admission: tokio::sync::mpsc::Sender<AdmissionJob>,
+}
+impl PeerServer {
+    fn new(node: Arc<Mutex<Node>>) -> Result<Self> {
+        let (chain, verifier, accepts_transactions) = {
+            let node = node.lock().map_err(cap_error)?;
+            (
+                node.genesis.chain_id,
+                node.verifier.clone(),
+                node.config.sync_peer.is_none(),
+            )
+        };
+        let (admission, mut queue) = tokio::sync::mpsc::channel::<AdmissionJob>(2);
+        let state = node.clone();
+        tokio::spawn(async move {
+            // Dequeue in RPC arrival order, regardless of GPU completion order.
+            // Jobs retain their verification task even if a caller drops its reply.
+            while let Some(job) = queue.recv().await {
+                let decoded = job
+                    .decoded
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .and_then(|r| r);
+                let result = match decoded {
+                    Ok(decoded) => {
+                        let node = state.clone();
+                        tokio::task::spawn_blocking(move || {
+                            node.lock()
+                                .map_err(cap_error)?
+                                .submit_decoded_batch(decoded)
+                        })
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .and_then(|r| r)
+                    }
+                    Err(error) => Err(error),
+                };
+                let _ = job.reply.send(result);
+            }
+        });
+        Ok(Self {
+            node,
+            chain,
+            accepts_transactions,
+            verifier,
+            admission,
+        })
+    }
 }
 fn cap_error(error: impl std::fmt::Display) -> capnp::Error {
     capnp::Error::failed(error.to_string())
 }
 fn fill_block(mut builder: block::Builder<'_>, value: &crate::types::Block) -> Result<()> {
-    builder.set_chain_id(value.chain_id);
-    builder.set_height(value.height);
-    builder.set_timestamp(value.timestamp);
-    builder.set_parent_hash(&value.parent_hash);
-    builder.set_state_root(&value.state_root);
-    let mut transactions = builder.init_transactions(value.transactions.len() as u32);
-    for (index, raw) in value.transactions.iter().enumerate() {
-        transactions.set(index as u32, &hex::decode(raw.trim_start_matches("0x"))?);
+    let message = value.read()?;
+    let source = message.get_root::<crate::storage_capnp::block::Reader>()?;
+    builder.set_chain_id(source.get_chain_id());
+    builder.set_height(source.get_height());
+    builder.set_timestamp(source.get_timestamp());
+    builder.set_parent_hash(source.get_parent_hash()?);
+    builder.set_state_root(source.get_state_root()?);
+    let source = source.get_transactions()?;
+    let mut transactions = builder.init_transactions(source.len());
+    for (index, raw) in source.iter().enumerate() {
+        transactions.set(index as u32, raw?);
     }
+
     Ok(())
 }
 impl peer::Server for PeerServer {
+    fn submit_transactions(
+        &mut self,
+        params: peer::SubmitTransactionsParams,
+        mut results: peer::SubmitTransactionsResults,
+    ) -> Promise<(), capnp::Error> {
+        if !self.accepts_transactions {
+            return Promise::err(cap_error("follower is read-only; submit to the sequencer"));
+        }
+        // Reserve queue capacity synchronously in call-arrival order. A rejected
+        // request starts no GPU task; at most two queued jobs plus one active job.
+        let prepared = (|| -> Result<_> {
+            let permit = self
+                .admission
+                .clone()
+                .try_reserve_owned()
+                .map_err(|_| anyhow::anyhow!("submission queue is full"))?;
+            let input = params.get()?.get_transactions()?;
+            anyhow::ensure!(
+                !input.is_empty() && input.len() as usize <= crate::types::MAX_BLOCK_TRANSACTIONS,
+                "batch must contain 1..4096 transactions"
+            );
+            let mut size = 0usize;
+            let mut raw = Vec::with_capacity(input.len() as usize);
+            for tx in input.iter() {
+                let tx = tx?;
+                size = size
+                    .checked_add(tx.len())
+                    .ok_or_else(|| cap_error("size overflow"))?;
+                anyhow::ensure!(
+                    tx.len() <= crate::types::MAX_TX_BYTES && size <= crate::types::MAX_BLOCK_BYTES,
+                    "transaction batch exceeds size limit"
+                );
+                raw.push(Bytes::copy_from_slice(tx));
+            }
+            let verifier = self.verifier.clone();
+            let chain = self.chain;
+            let decoded = tokio::task::spawn_blocking(move || verifier.decode_shared(&raw, chain));
+            let (reply, receiver) = tokio::sync::oneshot::channel();
+            permit.send(AdmissionJob { decoded, reply });
+            Ok(receiver)
+        })();
+        let receiver = match prepared {
+            Ok(receiver) => receiver,
+            Err(error) => return Promise::err(cap_error(error)),
+        };
+        Promise::from_future(async move {
+            let admitted = receiver.await.map_err(cap_error)?.map_err(cap_error)?;
+            let mut output = results.get().init_results(admitted.len() as u32);
+            for (i, result) in admitted.into_iter().enumerate() {
+                let mut item = output.reborrow().get(i as u32);
+                match result {
+                    Ok(hash) => item.set_hash(&hash),
+                    Err(error) => item.set_error(error.to_string().as_str()),
+                }
+            }
+            Ok(())
+        })
+    }
+    fn account(
+        &mut self,
+        params: peer::AccountParams,
+        mut results: peer::AccountResults,
+    ) -> Promise<(), capnp::Error> {
+        let result = (|| -> Result<()> {
+            let params = params.get()?;
+            let address = params.get_address()?;
+            anyhow::ensure!(address.len() == 20, "address must be 20 bytes");
+            let node = self.node.lock().map_err(cap_error)?;
+            let world = node.world()?;
+            let account = world.accounts.get(&format!("0x{}", hex::encode(address)));
+            let balance = account
+                .map(|a| a.balance.parse::<revm::primitives::U256>())
+                .transpose()?
+                .unwrap_or_default();
+            results
+                .get()
+                .set_nonce(account.map(|a| a.nonce).unwrap_or_default());
+            results.get().set_balance(&balance.to_be_bytes::<32>());
+            Ok(())
+        })()
+        .map_err(cap_error);
+        Promise::from_future(async move { result })
+    }
+    fn committed_transaction(
+        &mut self,
+        params: peer::CommittedTransactionParams,
+        mut results: peer::CommittedTransactionResults,
+    ) -> Promise<(), capnp::Error> {
+        let result = (|| -> Result<()> {
+            let params = params.get()?;
+            let hash = params.get_hash()?;
+            anyhow::ensure!(hash.len() == 32, "hash must be 32 bytes");
+            let node = self.node.lock().map_err(cap_error)?;
+            if let Some(block) = node.store.receipt_block(hash)? {
+                let message = block.read()?;
+                let root = message.get_root::<crate::storage_capnp::block::Reader>()?;
+                for receipt in root.get_receipts()?.iter() {
+                    if receipt.get_transaction_hash()? == hash {
+                        let mut out = results.get();
+                        out.set_found(true);
+                        out.set_height(block.height());
+                        out.set_block_hash(&block.hash());
+                        out.set_success(receipt.get_success());
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        })()
+        .map_err(cap_error);
+        Promise::from_future(async move { result })
+    }
+    fn verification(
+        &mut self,
+        _params: peer::VerificationParams,
+        mut results: peer::VerificationResults,
+    ) -> Promise<(), capnp::Error> {
+        let verifier = match self.node.lock() {
+            Ok(node) => node.verifier.clone(),
+            Err(e) => return Promise::err(cap_error(e)),
+        };
+        Promise::from_future(async move {
+            let status = tokio::task::spawn_blocking(move || verifier.status())
+                .await
+                .map_err(cap_error)?
+                .map_err(cap_error)?;
+            let mut out = results.get();
+            out.set_node_pid(std::process::id());
+            out.set_runtime(status["gpu_runtime"].as_str().unwrap_or_default());
+            out.set_cpu_records(status["cpu_records"].as_u64().unwrap_or_default());
+            out.set_gpu_records(status["gpu_records"].as_u64().unwrap_or_default());
+            out.set_external_worker(!status["gpu_worker_pid"].is_null());
+            Ok(())
+        })
+    }
     fn status(
         &mut self,
         _params: peer::StatusParams,
@@ -38,9 +234,9 @@ impl peer::Server for PeerServer {
             let node = node.lock().map_err(cap_error)?;
             let head = node.head();
             let mut out = results.get().init_status();
-            out.set_protocol_version(1);
-            out.set_chain_id(head.chain_id);
-            out.set_height(head.height);
+            out.set_protocol_version(crate::codec::PROTOCOL_VERSION);
+            out.set_chain_id(head.chain_id());
+            out.set_height(head.height());
             out.set_block_hash(&node.store.head_hash().map_err(cap_error)?);
             out.set_earliest_height(node.store.earliest_height().map_err(cap_error)?);
             Ok(())
@@ -100,7 +296,7 @@ impl peer::Server for PeerServer {
                 let Some(block) = node.store.block(height).map_err(cap_error)? else {
                     break;
                 };
-                let size: usize = block.transactions.iter().map(|tx| tx.len() / 2).sum();
+                let size = block.as_bytes().len();
                 if !blocks.is_empty() && bytes + size > 2 * 1024 * 1024 {
                     break;
                 }
@@ -110,6 +306,39 @@ impl peer::Server for PeerServer {
             let mut output = results.get().init_blocks(blocks.len() as u32);
             for (index, block) in blocks.iter().enumerate() {
                 fill_block(output.reborrow().get(index as u32), block).map_err(cap_error)?;
+            }
+            Ok(())
+        })();
+        Promise::from_future(async move { result })
+    }
+    fn get_encoded_blocks(
+        &mut self,
+        params: peer::GetEncodedBlocksParams,
+        mut results: peer::GetEncodedBlocksResults,
+    ) -> Promise<(), capnp::Error> {
+        let result = (|| {
+            let params = params.get()?;
+            let limit = params.get_limit().min(64) as u64;
+            let node = self.node.lock().map_err(cap_error)?;
+            let mut blocks = Vec::new();
+            let mut bytes = 0;
+            for offset in 0..limit {
+                let height = params
+                    .get_start()
+                    .checked_add(offset)
+                    .ok_or_else(|| cap_error("height overflow"))?;
+                let Some(block) = node.store.block(height).map_err(cap_error)? else {
+                    break;
+                };
+                if !blocks.is_empty() && bytes + block.as_bytes().len() > 2 * 1024 * 1024 {
+                    break;
+                }
+                bytes += block.as_bytes().len();
+                blocks.push(block);
+            }
+            let mut output = results.get().init_blocks(blocks.len() as u32);
+            for (i, block) in blocks.iter().enumerate() {
+                output.set(i as u32, block.as_bytes());
             }
             Ok(())
         })();
@@ -155,7 +384,9 @@ macro_rules! tunnel {
 }
 fn reader_options() -> capnp::message::ReaderOptions {
     capnp::message::ReaderOptions {
-        traversal_limit_in_words: Some(2 * 1024 * 1024),
+        // A single full canonical block includes receipts/logs as well as raw
+        // transactions. Permit the bounded storage record plus RPC framing.
+        traversal_limit_in_words: Some((crate::codec::MAX_RECORD_BYTES + 2 * 1024 * 1024) / 8),
         nesting_limit: 32,
     }
 }
@@ -243,10 +474,13 @@ pub async fn serve(endpoint: quinn::Endpoint, node: Arc<Mutex<Node>>) -> Result<
                         reader_options(),
                     );
                     let service: peer::Client =
-                        capnp_rpc::new_client(PeerServer { node: node.clone() });
+                        capnp_rpc::new_client(PeerServer::new(node.clone())?);
                     let rpc = RpcSystem::new(Box::new(network), Some(service.client));
                     tokio::task::spawn_local(async move {
-                        let _ = tokio::time::timeout(Duration::from_secs(60), rpc).await;
+                        // Active stress/sync sessions are long-lived. A wall-clock deadline
+                        // would disconnect a healthy peer every minute; EOF tears down the
+                        // RPC task and the connection semaphore still bounds idle peers.
+                        let _ = rpc.await;
                         for task in tasks {
                             task.abort();
                         }
@@ -382,76 +616,68 @@ impl PeerConnection {
             tasks,
         })
     }
-    pub async fn status(&self) -> Result<serde_json::Value> {
+    async fn chain_status(&self) -> Result<PeerStatus> {
         let response = tokio::time::timeout(
             Duration::from_secs(5),
             self.client.status_request().send().promise,
         )
         .await??;
-        let status = response.get()?.get_status()?;
+        let r = response.get()?.get_status()?;
+        Ok(PeerStatus {
+            protocol: r.get_protocol_version(),
+            chain: r.get_chain_id(),
+            height: r.get_height(),
+            hash: r.get_block_hash()?.try_into()?,
+            earliest: r.get_earliest_height(),
+        })
+    }
+    pub async fn status(&self) -> Result<serde_json::Value> {
+        let r = self.chain_status().await?;
         Ok(
-            serde_json::json!({"transport":self.transport, "protocolVersion":status.get_protocol_version(), "chainId":status.get_chain_id(),
-            "height":status.get_height(),"blockHash":format!("0x{}",hex::encode(status.get_block_hash()?)),"earliestHeight":status.get_earliest_height()}),
+            serde_json::json!({"transport":self.transport,"protocolVersion":r.protocol,"chainId":r.chain,"height":r.height,"blockHash":crate::types::hex_hash(&r.hash),"earliestHeight":r.earliest}),
         )
     }
-    pub async fn blocks(&self, start: u64) -> Result<Vec<WireBlock>> {
-        let mut request = self.client.get_blocks_request();
+    pub async fn blocks(&self, start: u64) -> Result<Vec<crate::types::Block>> {
+        let mut request = self.client.get_encoded_blocks_request();
         request.get().set_start(start);
         request.get().set_limit(64);
         let response =
             tokio::time::timeout(Duration::from_secs(5), request.send().promise).await??;
-        response
-            .get()?
-            .get_blocks()?
+        // One owned payload at the RPC/thread boundary, no per-transaction hydration.
+        let blocks = response.get()?.get_blocks()?;
+        anyhow::ensure!(blocks.len() <= 64, "peer exceeded requested block count");
+        blocks
             .iter()
-            .map(WireBlock::read)
+            .map(|b| crate::types::Block::from_bytes(Bytes::copy_from_slice(b?)))
             .collect()
     }
 }
-#[derive(Clone, Debug)]
-pub struct WireBlock {
-    pub chain_id: u64,
-    pub height: u64,
-    pub timestamp: u64,
-    pub parent_hash: [u8; 32],
-    pub state_root: [u8; 32],
-    pub transactions: Vec<Vec<u8>>,
-}
-impl WireBlock {
-    fn read(block: block::Reader<'_>) -> Result<Self> {
-        Ok(Self {
-            chain_id: block.get_chain_id(),
-            height: block.get_height(),
-            timestamp: block.get_timestamp(),
-            parent_hash: block.get_parent_hash()?.try_into()?,
-            state_root: block.get_state_root()?.try_into()?,
-            transactions: block
-                .get_transactions()?
-                .iter()
-                .map(|tx| tx.map(|t| t.to_vec()).map_err(Into::into))
-                .collect::<Result<_>>()?,
-        })
-    }
+struct PeerStatus {
+    protocol: u32,
+    chain: u64,
+    height: u64,
+    hash: [u8; 32],
+    earliest: u64,
 }
 pub async fn sync_once(node: Arc<Mutex<Node>>, peer: &PeerConnection) -> Result<usize> {
-    let status = peer.status().await?;
+    let status = peer.chain_status().await?;
     let start = {
         let local = node.lock().map_err(cap_error)?;
-        anyhow::ensure!(status["protocolVersion"] == 1, "unsupported peer protocol");
         anyhow::ensure!(
-            status["chainId"] == local.genesis.chain_id,
+            status.protocol == crate::codec::PROTOCOL_VERSION,
+            "unsupported peer protocol"
+        );
+        anyhow::ensure!(
+            status.chain == local.genesis.chain_id,
             "peer chain mismatch"
         );
-        let height = local.head().height;
+        let height = local.head().height();
         anyhow::ensure!(
-            status["earliestHeight"].as_u64().unwrap_or(u64::MAX) <= height + 1,
+            status.earliest <= height + 1,
             "peer pruned required history; use an archive peer"
         );
-        if status["height"].as_u64() == Some(height) {
-            anyhow::ensure!(
-                status["blockHash"] == crate::types::hex_hash(&local.head().hash()),
-                "peer head diverges"
-            );
+        if status.height == height {
+            anyhow::ensure!(status.hash == local.head().hash(), "peer head diverges");
             return Ok(0);
         }
         height + 1
@@ -461,7 +687,7 @@ pub async fn sync_once(node: Arc<Mutex<Node>>, peer: &PeerConnection) -> Result<
     tokio::task::spawn_blocking(move || {
         let mut local = node.lock().map_err(cap_error)?;
         for block in blocks {
-            local.import(block)?;
+            local.import_encoded(block)?;
         }
         Ok::<_, anyhow::Error>(())
     })
@@ -499,7 +725,7 @@ pub async fn follow(node: Arc<Mutex<Node>>, config: SyncPeer) -> Result<()> {
     }
 }
 
-/// Direct Capnp RPC is an opt-in, loopback-only transport for local peers.
+/// Direct Capnp RPC is the default loopback-only transport for local peers.
 pub async fn serve_tcp(listener: tokio::net::TcpListener, node: Arc<Mutex<Node>>) -> Result<()> {
     anyhow::ensure!(
         listener.local_addr()?.ip().is_loopback(),
@@ -512,7 +738,7 @@ pub async fn serve_tcp(listener: tokio::net::TcpListener, node: Arc<Mutex<Node>>
             continue;
         };
         stream.set_nodelay(true)?;
-        let service: peer::Client = capnp_rpc::new_client(PeerServer { node: node.clone() });
+        let service: peer::Client = capnp_rpc::new_client(PeerServer::new(node.clone())?);
         tokio::task::spawn_local(async move {
             let _permit = permit;
             let (reader, writer) = futures::AsyncReadExt::split(stream.compat());
@@ -523,7 +749,8 @@ pub async fn serve_tcp(listener: tokio::net::TcpListener, node: Arc<Mutex<Node>>
                 reader_options(),
             );
             let rpc = RpcSystem::new(Box::new(network), Some(service.client));
-            let _ = tokio::time::timeout(Duration::from_secs(60), rpc).await;
+            // Keep healthy sessions alive until the peer disconnects.
+            let _ = rpc.await;
         });
     }
 }
@@ -531,16 +758,36 @@ pub async fn serve_tcp(listener: tokio::net::TcpListener, node: Arc<Mutex<Node>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn wire_rejects_invalid_hash_lengths() {
-        let mut message = capnp::message::Builder::new_default();
-        let mut block = message.init_root::<block::Builder<'_>>();
-        block.set_parent_hash(&[0; 31]);
-        block.set_state_root(&[0; 32]);
-        assert!(WireBlock::read(block.reborrow_as_reader()).is_err());
-        block.set_parent_hash(&[0; 32]);
-        assert!(WireBlock::read(block.reborrow_as_reader()).is_ok());
-        block.set_state_root(&[0; 33]);
-        assert!(WireBlock::read(block.reborrow_as_reader()).is_err());
+    struct Oversized;
+    impl peer::Server for Oversized {
+        fn get_encoded_blocks(
+            &mut self,
+            _: peer::GetEncodedBlocksParams,
+            mut results: peer::GetEncodedBlocksResults,
+        ) -> Promise<(), capnp::Error> {
+            results.get().init_blocks(65);
+            Promise::ok(())
+        }
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn peer_cannot_exceed_requested_block_count() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let peer = PeerConnection {
+                    client: capnp_rpc::new_client(Oversized),
+                    _sender: None,
+                    connection: None,
+                    _endpoint: None,
+                    transport: crate::config::Transport::Tcp,
+                    tasks: vec![],
+                };
+                assert!(peer
+                    .blocks(1)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("block count"));
+            })
+            .await;
     }
 }

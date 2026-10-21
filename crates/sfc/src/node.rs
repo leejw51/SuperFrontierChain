@@ -27,11 +27,14 @@ impl Node {
     }
     pub fn open(config: Config, app: Application) -> Result<Self> {
         config.validate()?;
-        let genesis: Genesis = serde_json::from_slice(&std::fs::read(&config.genesis)?)?;
+        let genesis: Genesis = crate::codec::from_slice(&std::fs::read(&config.genesis)?)?;
         let verifier = std::sync::Arc::new(crate::verification::Verifier::new(
             config.verification.clone(),
         )?);
         let store = Store::open(&config.data_dir, config.retention.clone(), &genesis)?;
+        // Only rewrite compatible metadata after the database protocol check.
+        // A rejected v1/v2 home must retain its original configuration files.
+        let _: Genesis = crate::codec::upgrade_file(&config.genesis)?;
         let world = store.world()?;
         let head = store.head()?;
         let pending_db = if config.sync_peer.is_none() {
@@ -69,7 +72,7 @@ impl Node {
             self.config.sync_peer.is_none(),
             "follower is read-only; submit to the sequencer"
         );
-        let context = self.context(self.head.height + 1, self.head.timestamp);
+        let context = self.context(self.head.height() + 1, self.head.timestamp());
         admit(
             &mut self.pending,
             &mut self.pending_hashes,
@@ -100,7 +103,7 @@ impl Node {
             self.config.sync_peer.is_none(),
             "follower is read-only; submit to the sequencer"
         );
-        let context = self.context(self.head.height + 1, self.head.timestamp);
+        let context = self.context(self.head.height() + 1, self.head.timestamp());
         let mut executor = ethereum::Executor::new(&mut self.pending_db, context);
         Ok(decoded
             .into_iter()
@@ -135,7 +138,7 @@ impl Node {
             self.config.sync_peer.is_none(),
             "followers cannot produce blocks"
         );
-        let timestamp = timestamp.max(self.head.timestamp);
+        let timestamp = timestamp.max(self.head.timestamp());
         let prepared = self.app.prepare_pending(
             &self.head,
             &self.world,
@@ -153,7 +156,7 @@ impl Node {
         self.head = block.clone();
         self.world = next;
         self.pending_db = pending_db(&self.world, &self.head, self.store.head_hash()?)?;
-        let context = self.context(block.height + 1, block.timestamp);
+        let context = self.context(block.height() + 1, block.timestamp());
         let mut executor = ethereum::Executor::new(&mut self.pending_db, context);
         self.pending
             .retain(|tx| executor.execute(tx.env.clone(), true).is_ok());
@@ -168,38 +171,42 @@ impl Node {
     pub fn head(&self) -> &Block {
         &self.head
     }
-    pub fn import(&mut self, remote: crate::network::WireBlock) -> Result<()> {
+    pub fn import_encoded(&mut self, remote: Block) -> Result<()> {
         ensure!(
             self.config.sync_peer.is_some(),
             "only followers import blocks"
         );
         ensure!(
-            remote.chain_id == self.genesis.chain_id,
+            remote.chain_id() == self.genesis.chain_id,
             "remote chain mismatch"
         );
         ensure!(
-            remote.height == self.head.height + 1 && remote.parent_hash == self.head.hash(),
+            remote.height() == self.head.height() + 1 && remote.parent_hash() == self.head.hash(),
             "remote ancestry mismatch"
         );
-        ensure!(
-            remote.transactions.len() <= crate::types::MAX_BLOCK_TRANSACTIONS,
-            "remote block has too many transactions"
-        );
+        let reader = remote.read()?;
+        let root = reader.get_root::<crate::storage_capnp::block::Reader>()?;
+        let bytes = remote.shared_bytes();
+        let raw = root
+            .get_transactions()?
+            .iter()
+            .map(|tx| Ok(bytes.slice_ref(tx?)))
+            .collect::<Result<Vec<_>>>()?;
         let transactions = self
             .verifier
-            .decode_batch(&remote.transactions, self.genesis.chain_id)?
+            .decode_shared(&raw, self.genesis.chain_id)?
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
         let (block, world) = self.app.execute_block(
             &self.head,
             &self.world,
-            remote.timestamp,
+            remote.timestamp(),
             self.genesis.gas_limit,
             &transactions,
         )?;
         ensure!(
-            block.state_root == remote.state_root,
-            "remote execution root mismatch"
+            block.as_bytes() == remote.as_bytes(),
+            "remote execution record mismatch"
         );
         self.store.commit_delta(&block, &world, &self.world)?;
         self.head = block;
@@ -211,7 +218,7 @@ impl Node {
 fn pending_db(world: &World, head: &Block, hash: Hash) -> Result<crate::evm_db::OrderedDb> {
     let mut db = ethereum::load_db(world)?;
     db.block_hashes.insert(
-        revm::primitives::U256::from(head.height),
+        revm::primitives::U256::from(head.height()),
         revm::primitives::B256::from(hash),
     );
     Ok(db)

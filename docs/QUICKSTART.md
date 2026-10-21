@@ -5,14 +5,17 @@ contract execution, 100 ms blocks, and Cap’n Proto RPC over HTTP/3 synchroniza
 The runnable topology is one development sequencer and verifying followers.
 Distributed validator consensus is not integrated.
 
+Protocol v3 starts in fresh `-v2` homes and preserves old JSON chain directories.
+See [binary formats and configuration editing](CAPNP-V3.md).
+
 ## Requirements
 
 - Rust and Cargo, a C/C++ toolchain, and libclang for RocksDB.
 - The `capnp` compiler for generated protocol bindings.
-- Make and Python 3 for lifecycle commands and local test networks.
-- Apple Silicon + Metal, Python 3.13 and `uv` for GPU/HYBRID verification.
+- Make, uv, Python 3.13 and pycapnp for lifecycle commands and local test networks (`make codec-setup`).
+- Apple Silicon + Metal for GPU/HYBRID verification; the default Rust/MLX runtime needs no Python.
   GPU is the default; use `SFC_VERIFICATION_BACKEND=cpu` on other platforms.
-- Node.js and npm for the ERC-20 integration tests only.
+- Node.js and npm for integration tooling and dashboard builds.
 - macOS or Linux for the Python service's file locks and Unix control socket.
 
 Run commands from the repository root. `make doctor` checks the main native tools;
@@ -23,12 +26,12 @@ it does not install dependencies. Builds use `Cargo.lock`.
 ```sh
 make help
 make doctor
-make mlx-setup  # once, for GPU/HYBRID on Apple Silicon
+make codec-setup  # Python tooling for the optional service/testnet commands
 make start
 ```
 
 `make` alone shows help. `make start` builds the optimized release binary,
-initializes `.sfc/` if configuration is absent, and starts a background node.
+initializes `.sfc-v3/` if configuration is absent, and starts a background node.
 Existing configuration and state are reused. For CPU mode use
 `SFC_VERIFICATION_BACKEND=cpu make start`; for HYBRID use
 `SFC_VERIFICATION_BACKEND=hybrid make start`. An already-running service must be
@@ -45,7 +48,8 @@ curl -s http://127.0.0.1:8545/ \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
 
-curl -s http://127.0.0.1:8545/dashboard/stats
+curl -s http://127.0.0.1:8545/dashboard/stats -o /tmp/sfc-stats.capnp
+python3 scripts/sfc_codec.py /tmp/sfc-stats.capnp
 make peer-status
 ```
 
@@ -69,7 +73,7 @@ make start DATA_DIR=.sfc-local
 make stop DATA_DIR=.sfc-local
 ```
 
-Custom homes still default to the same ports. Change their `config.json` listener
+Custom homes still default to the same ports. Change their `config.capnp` listener
 addresses before running multiple independent services. If `CONFIG` overrides the
 default path, that file must already exist.
 
@@ -82,7 +86,7 @@ make run DATA_DIR=.sfc-foreground
 ```
 
 `make dev` uses a debug build; `make run-log` runs in the foreground and appends
-node diagnostics to `DATA_DIR/node.jsonl`.
+node diagnostics to `DATA_DIR/node.log`.
 
 ## Defaults and files
 
@@ -98,13 +102,14 @@ node diagnostics to `DATA_DIR/node.jsonl`.
 
 Listeners must use loopback addresses in the current development implementation.
 
-| Path under `.sfc/` | Purpose |
+| Path under `.sfc-v3/` | Purpose |
 | --- | --- |
-| `config.json`, `genesis.json` | Node configuration and chain initialization |
+| `config.capnp`, `genesis.capnp` | Node configuration and chain initialization |
 | `peer-cert.der`, `peer-key.der` | Local TLS identity; keep the private key private |
 | `data/rocksdb/` | Authoritative state, history, indexes, and native WAL |
-| `data/history/*.jsonl` | Recoverable hourly block-history projection |
-| `node.jsonl` | Structured runtime logs for background/logged runs |
+| `data/history/*.capnp` | Recoverable hourly block-history projection |
+| `node.log` | Readable node/GPU diagnostics |
+| `data/logs/node.capnp` | Structured binary events, indexed in SQLite |
 | `service.log` | Python service diagnostics |
 | `service.lock`, `control.sock` | Background process ownership and control |
 
@@ -120,7 +125,7 @@ The generated configuration enables pruning:
 ```
 
 The cutoff follows committed block time. Old blocks and receipt indexes expire;
-current balances, code, and contract storage remain. Hourly JSONL rotation may
+current balances, code, and contract storage remain. Hourly Cap’n Proto rotation may
 retain less than one extra hour in the boundary segment. Disk space is reclaimed
 through RocksDB compaction rather than immediately upon logical deletion.
 
@@ -145,7 +150,7 @@ make testnet
 
 The Python supervisor starts one sequencer and three followers. Default RPC ports
 are 8545–8548; HTTP/3 UDP ports are 26656–26659. Each node has its own data and
-`node.jsonl` under `.sfc-testnet/node-N/`. Submit transactions to node 0. Followers
+`node.log` under `.sfc-testnet-v3/node-N/`. Submit transactions to node 0. Followers
 replay its blocks over certificate-pinned HTTP/3. Ctrl-C shuts down the whole group.
 The supervisor restarts crashed processes with a bounded retry budget.
 
@@ -180,21 +185,25 @@ supported methods and limitations.
 | `make integration` | Process smoke, ERC-20, supervisor, TCP, and pruning tests |
 | `make test-sync` | HTTP/3 catch-up, crash recovery, and pruning scenarios |
 | `make test-service` | Background start/stop and failure cleanup |
-| `make benchmark` | Release-mode local processing benchmark (`bench` alias) |
-| `make bench-network` | Two-node HTTP admission through durable follower replay |
+| `make benchmark` | Rust-only release committed TPS/CPU; SQLite ON/OFF |
+| `make bench-network` | Two-node binary RPC admission through durable follower replay |
 | `make test-emergencies` | 15 crash, freeze, partition and recovery scenarios |
 
 ```sh
-SFC_BENCH_BATCH=4096 SFC_BENCH_BLOCKS=100 make benchmark
+make benchmark BENCH_TRANSACTIONS=262144 BENCH_REPEAT=3 BENCH_SQLITE=both
+make stresstest STRESS_SQLITE=on
+make stop
 ```
 
-Defaults are 100 blocks × 100 native transfers. Networking and scheduler waits are
-excluded. The configured transaction-count ceiling at 100 ms is 40,960 tx/s; this is
-not measured sustained network throughput. See [performance](PERFORMANCE.md).
+`benchmark` defaults to 262,144 transfers per trial, three trials per SQLite mode,
+4,096 requests per batch and a 10 ms block interval. Rust generates signatures
+before timing; measured TPS includes RPC, verification, execution and durable commit.
+`bench-network` also waits for follower replay. `bench` remains the separate Rust
+execution microbenchmark. See [verification and measurements](VERIFICATION-BACKENDS.md).
 
 ## Troubleshooting
 
-- **Startup failed:** inspect `node.jsonl` and `service.log`; check port conflicts.
+- **Startup failed:** inspect `node.log` and `service.log`; check port conflicts.
 - **Genesis mismatch:** use the original genesis for existing data or a fresh home.
 - **Follower missing history:** configure an archive peer with the same chain and
   genesis. Automatic snapshot sync and peer failover are not implemented.
@@ -205,3 +214,7 @@ not measured sustained network throughput. See [performance](PERFORMANCE.md).
   is no automatic destructive repair or silent rollback.
 
 Next: [protocol](PROTOCOL.md) · [architecture](ARCHITECTURE.md).
+
+Binary bulk RPC benchmarking defaults to TCP. Use `BENCH_TRANSPORT=http3` to select
+HTTP/3, or `make bench-transports` to alternate both transports under the same
+conditions. See [measured transport results](BINARY-TRANSPORT-BENCHMARK.md).

@@ -43,10 +43,7 @@ impl Config {
             self.development,
             "only explicit development mode is implemented"
         );
-        ensure!(
-            self.block_interval_ms >= 10,
-            "block interval must be >=10ms"
-        );
+        ensure!(self.block_interval_ms >= 1, "block interval must be >=1ms");
         ensure!(
             self.max_pending > 0
                 && self.max_block_transactions > 0
@@ -86,8 +83,8 @@ pub struct SyncPeer {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
-    #[default]
     Http3,
+    #[default]
     Tcp,
 }
 impl SyncPeer {
@@ -106,7 +103,7 @@ mod tests {
     fn transport_defaults_and_validation() {
         let value = serde_json::json!({"address":"127.0.0.1:26656","server_name":"localhost","certificate":"cert.der"});
         let mut peer: SyncPeer = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(peer.transport, Transport::Http3);
+        assert_eq!(peer.transport, Transport::Tcp);
         peer.transport = Transport::Tcp;
         assert!(peer.validate().is_ok());
         peer.address = "192.0.2.1:26656".parse().unwrap();

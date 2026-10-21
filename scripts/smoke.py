@@ -2,6 +2,7 @@
 """Real-process HTTP/3 catch-up, pin verification, restart, and JSON-RPC smoke test."""
 import argparse
 import json
+import sfc_codec as codec
 import pathlib
 import signal
 import socket
@@ -56,41 +57,42 @@ def main():
         configs = []
         for home in homes:
             subprocess.run([BIN, "init", "--home", home], check=True, capture_output=True)
-            config = json.loads((home / "config.json").read_text())
+            config = codec.loads((home / "config.capnp").read_bytes())
             config.update(rpc_listen=f"127.0.0.1:{port()}", peer_listen=f"127.0.0.1:{port(True)}", block_interval_ms=500)
             if transport == "tcp":
                 config["capnp_listen"] = f"127.0.0.1:{port()}"
             configs.append(config)
-        (homes[1] / "genesis.json").write_bytes((homes[0] / "genesis.json").read_bytes())
+        (homes[1] / "genesis.capnp").write_bytes((homes[0] / "genesis.capnp").read_bytes())
         address = configs[0]["capnp_listen" if transport == "tcp" else "peer_listen"]
         configs[1]["sync_peer"] = {"transport": transport, "address": address, "server_name": "localhost", "certificate": configs[0]["tls_cert"]}
         for home, config in zip(homes, configs):
-            (home / "config.json").write_text(json.dumps(config))
+            (home / "config.capnp").write_bytes(codec.dumps(config))
         urls = ["http://" + c["rpc_listen"] for c in configs]
         processes = []
         logs = []
         try:
             for home in homes:
-                log = (home / "node.jsonl").open("w+")
+                log = (home / "node.log").open("w+")
                 logs.append(log)
-                processes.append(subprocess.Popen([BIN, "run", "--config", home / "config.json"], stdout=log, stderr=log))
+                processes.append(subprocess.Popen([BIN, "run", "--config", home / "config.capnp"], stdout=log, stderr=log))
                 wait(lambda: rpc(urls[len(processes)-1], "eth_chainId") == "0x1e61", "RPC startup")
             with urllib.request.urlopen(urls[0] + "/dashboard", timeout=3) as response:
                 assert response.status == 200
-                assert b"Blockchain statistics" in response.read()
+                assert b"SF CHAIN" in response.read()
             with urllib.request.urlopen(urls[0] + "/dashboard/stats", timeout=3) as response:
                 assert response.headers["Cache-Control"] == "no-store"
-                stats = json.load(response)
+                assert response.headers["Content-Type"] == "application/x-capnp"
+                stats = codec.load(response)
                 assert stats["chainId"] == 7777
                 assert stats["retention"]["mode"] == "pruned"
                 assert stats["role"] == "Development sequencer"
                 assert stats["recentBlocks"][0]["height"] == stats["height"]
             with urllib.request.urlopen(urls[1] + "/dashboard/stats", timeout=3) as response:
-                assert json.load(response)["role"] == "Follower"
-            peer = subprocess.run([BIN, "peer-status", "--address", address, "--transport", transport, "--certificate", configs[0]["tls_cert"]], capture_output=True, text=True, timeout=10)
+                assert codec.load(response)["role"] == "Follower"
+            peer = subprocess.run([BIN, "peer-status", "--address", address, "--transport", transport, "--certificate", configs[0]["tls_cert"]], capture_output=True, timeout=10)
             assert peer.returncode == 0, peer.stderr
-            assert json.loads(peer.stdout)["transport"] == transport
-            wrong = subprocess.run([BIN, "peer-status", "--address", address, "--transport", transport, "--certificate", configs[1]["tls_cert"]], capture_output=True, text=True, timeout=10)
+            assert codec.loads(peer.stdout)["transport"] == transport
+            wrong = subprocess.run([BIN, "peer-status", "--address", address, "--transport", transport, "--certificate", configs[1]["tls_cert"]], capture_output=True, timeout=10)
             if transport == "http3":
                 assert wrong.returncode != 0, "untrusted peer certificate accepted"
             # Exercise Ethereum JSON-RPC framing over a real HTTP socket.
@@ -112,23 +114,23 @@ def main():
             stop(processes[1])
             # Restart the leader and confirm history survived; follower will resume too.
             for i, home in enumerate(homes):
-                processes[i] = subprocess.Popen([BIN, "run", "--config", home / "config.json"], stdout=logs[i], stderr=logs[i])
+                processes[i] = subprocess.Popen([BIN, "run", "--config", home / "config.capnp"], stdout=logs[i], stderr=logs[i])
                 wait(lambda i=i: int(rpc(urls[i], "eth_blockNumber"), 16) > height, "restart/catch-up")
             compare = hex(height)
             assert rpc(urls[0], "eth_getBlockByNumber", [compare, False]) == rpc(urls[1], "eth_getBlockByNumber", [compare, False])
             print(f"PASS: {transport} Capnp RPC, Ethereum HTTP JSON-RPC, block replay, matching roots, restart")
         except BaseException:
-            for log in logs:
+            for home, log in zip(homes, logs):
                 log.flush(); log.seek(0); print(log.read())
             raise
         finally:
             for process in processes:
                 if process.poll() is None:
                     stop(process)
-            for log in logs:
+            for home, log in zip(homes, logs):
                 log.flush()
                 log.seek(0)
-                records = [json.loads(line) for line in log if line.strip()]
+                records = list(codec.records((home / 'data/logs/node.capnp').open('rb')))
                 assert records, "missing runtime logs"
                 assert all(set(["timestamp_ms", "level", "event", "pid", "fields"]) <= r.keys() for r in records)
                 assert any(r["event"] == "node_started" for r in records)

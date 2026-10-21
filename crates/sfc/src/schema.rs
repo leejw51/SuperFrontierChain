@@ -5,14 +5,14 @@ use anyhow::{ensure, Context, Result};
 use rocksdb::{WriteBatch, DB};
 use rusqlite::{Connection, TransactionBehavior};
 
-pub const ROCKSDB_VERSION: u32 = 1;
-pub const SIGNER_VERSION: u32 = 1;
-pub const SQLITE_VERSION: u32 = 2;
+pub const ROCKSDB_VERSION: u32 = 2;
+pub const SIGNER_VERSION: u32 = 2;
+pub const SQLITE_VERSION: u32 = 3;
 pub(crate) const ROCKSDB_VERSION_KEY: &[u8] = b"meta/schema_version";
 
 pub(crate) fn rocksdb_version(db: &DB) -> Result<u32> {
     db.get(ROCKSDB_VERSION_KEY)?
-        .map(|bytes| serde_json::from_slice(&bytes).context("invalid RocksDB schema version"))
+        .map(|bytes| crate::codec::from_slice(&bytes).context("invalid RocksDB schema version"))
         .transpose()
         .map(|version| version.unwrap_or(0))
 }
@@ -28,10 +28,10 @@ pub(crate) fn check_rocksdb(db: &DB) -> Result<u32> {
 
 pub(crate) fn migrate_rocksdb(db: &DB) -> Result<()> {
     let version = check_rocksdb(db)?;
-    if version == 0 {
+    if version < ROCKSDB_VERSION {
         // v0 had no version marker. Accept both embedded accounts and the current
         // account/* layout, using exactly the same precedence as Store::world.
-        let mut world: World = serde_json::from_slice(
+        let mut world: World = crate::binary::world_from_bytes(
             &db.get(b"world")?
                 .context("missing world during migration")?,
         )?;
@@ -43,30 +43,39 @@ pub(crate) fn migrate_rocksdb(db: &DB) -> Result<()> {
             }
             world.accounts.insert(
                 std::str::from_utf8(&key[8..])?.to_owned(),
-                serde_json::from_slice(&value)?,
+                crate::binary::account_from_bytes(&value)?,
             );
         }
         let height: u64 =
-            serde_json::from_slice(&db.get(b"head")?.context("missing head during migration")?)?;
-        let block: Block = serde_json::from_slice(
-            &db.get(format!("block/{height:020}"))?
+            crate::codec::from_slice(&db.get(b"head")?.context("missing head during migration")?)?;
+        let block = Block::from_bytes(
+            db.get(format!("block/{height:020}"))?
                 .context("missing head block during migration")?,
         )?;
         ensure!(
-            block.state_root == world.root(),
+            block.state_root() == world.root(),
             "state commitment mismatch during RocksDB migration"
         );
         let mut batch = WriteBatch::default();
         if embedded_accounts {
             for (address, account) in &world.accounts {
-                batch.put(format!("account/{address}"), serde_json::to_vec(account)?);
+                batch.put(
+                    format!("account/{address}"),
+                    crate::binary::account_bytes(account)?,
+                );
             }
             world.accounts.clear();
-            batch.put(b"world", serde_json::to_vec(&world)?);
+            batch.put(b"world", crate::binary::world_bytes(&world)?);
         }
         // Data and version become durable together, so a crash retries v0 or
         // sees complete v1. Never rewrite serialized blocks or their hashes.
-        batch.put(ROCKSDB_VERSION_KEY, serde_json::to_vec(&ROCKSDB_VERSION)?);
+        batch.put(ROCKSDB_VERSION_KEY, crate::codec::to_vec(&ROCKSDB_VERSION)?);
+        let genesis: crate::types::Genesis = crate::codec::from_slice(
+            &db.get(b"genesis")?
+                .context("missing genesis during migration")?,
+        )?;
+        batch.put(b"genesis", crate::codec::to_vec(&genesis)?);
+        batch.put(b"head", crate::codec::to_vec(&height)?);
         db.write_opt(batch, &crate::journal::durable_write_options())?;
         crate::logging::event(
             "info",
@@ -82,6 +91,16 @@ pub(crate) fn sqlite_version(db: &Connection) -> Result<u32> {
 }
 
 pub(crate) fn check_sqlite(db: &Connection) -> Result<u32> {
+    let app: u32 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
+    let populated: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table')",
+        [],
+        |r| r.get(0),
+    )?;
+    ensure!(
+        !populated || app == 0x53464333,
+        "legacy SQLite index: preserve it and use a new protocol-v3 home"
+    );
     let version = sqlite_version(db)?;
     ensure!(
         version <= SQLITE_VERSION,
@@ -109,23 +128,24 @@ pub(crate) fn migrate_sqlite(db: &mut Connection) -> Result<()> {
 fn migrate_sqlite_transaction(tx: &rusqlite::Transaction<'_>) -> Result<u32> {
     let mut version = check_sqlite(tx)?;
     let original = version;
+    tx.pragma_update(None, "application_id", 0x53464333u32)?;
     if version == 0 {
         tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);
              INSERT OR IGNORE INTO meta VALUES ('height',-1),('log_offset',0),('logs',0),('transactions',0),('skipped_blocks',0);
-             CREATE TABLE IF NOT EXISTS blocks(height INTEGER PRIMARY KEY, hash TEXT UNIQUE NOT NULL, json TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS blocks(height INTEGER PRIMARY KEY, hash TEXT UNIQUE NOT NULL, record BLOB NOT NULL);
              CREATE TABLE IF NOT EXISTS transactions(
                  hash TEXT PRIMARY KEY, height INTEGER NOT NULL, position INTEGER NOT NULL,
-                 sender TEXT NOT NULL, recipient TEXT, raw TEXT NOT NULL, receipt TEXT NOT NULL);
+                 sender TEXT NOT NULL, recipient TEXT, raw BLOB NOT NULL, receipt BLOB NOT NULL);
              CREATE INDEX IF NOT EXISTS tx_height ON transactions(height DESC,position);
              CREATE INDEX IF NOT EXISTS tx_sender ON transactions(sender,height DESC);
              CREATE INDEX IF NOT EXISTS tx_recipient ON transactions(recipient,height DESC);
-             CREATE VIRTUAL TABLE IF NOT EXISTS logs USING fts5(timestamp_ms UNINDEXED, level, event, record);",
+             CREATE VIRTUAL TABLE IF NOT EXISTS logs USING fts5(timestamp_ms UNINDEXED, level, event, message, record UNINDEXED);",
         )?;
         // Fail on incompatible pre-existing tables instead of stamping a version
         // on a schema that the indexer cannot read.
         tx.prepare("SELECT key,value FROM meta LIMIT 0")?;
-        tx.prepare("SELECT height,hash,json FROM blocks LIMIT 0")?;
+        tx.prepare("SELECT height,hash,record FROM blocks LIMIT 0")?;
         tx.prepare(
             "SELECT hash,height,position,sender,recipient,raw,receipt FROM transactions LIMIT 0",
         )?;
@@ -140,18 +160,58 @@ fn migrate_sqlite_transaction(tx: &rusqlite::Transaction<'_>) -> Result<u32> {
         // picker. Backfill from retained block metadata, including pruned history.
         tx.execute_batch(
             "ALTER TABLE blocks ADD COLUMN transaction_count INTEGER NOT NULL DEFAULT 0 CHECK(transaction_count>=0);
-             UPDATE blocks SET transaction_count=json_extract(json,'$.transactions');
              CREATE INDEX populated_blocks ON blocks(height DESC) WHERE transaction_count>0;",
         )?;
-        let invalid: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM blocks WHERE typeof(transaction_count)!='integer')",
-            [],
-            |row| row.get(0),
-        )?;
-        ensure!(
-            !invalid,
-            "invalid block transaction count during SQLite migration"
-        );
+        let records = {
+            let mut statement = tx.prepare("SELECT height,record FROM blocks")?;
+            let rows = statement
+                .query_map([], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, Vec<u8>>(1)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows
+        };
+        for (height, bytes) in records {
+            let record: serde_json::Value = crate::codec::from_slice(&bytes)?;
+            let count = record["transactions"]
+                .as_u64()
+                .context("invalid block transaction count")?;
+            tx.execute(
+                "UPDATE blocks SET transaction_count=?1 WHERE height=?2",
+                rusqlite::params![count, height],
+            )?;
+        }
+        version = 2;
+        tx.pragma_update(None, "user_version", version)?;
+    }
+    if version == 2 {
+        // Bound working memory while upgrading a potentially large explorer index.
+        let mut cursor = -1i64;
+        loop {
+            let rows = {
+                let mut statement=tx.prepare("SELECT height,hash,record FROM blocks WHERE height>?1 ORDER BY height LIMIT 512")?;
+                let rows = statement
+                    .query_map([cursor], |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, Vec<u8>>(2)?,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                rows
+            };
+            if rows.is_empty() {
+                break;
+            }
+            for (height, hash, bytes) in rows {
+                let value = crate::codec::from_slice::<serde_json::Value>(&bytes)?;
+                let bytes = crate::binary::migrate_index_header(height.try_into()?, &hash, &value)?;
+                tx.execute(
+                    "UPDATE blocks SET record=?1 WHERE height=?2",
+                    rusqlite::params![bytes.as_ref(), height],
+                )?;
+                cursor = height;
+            }
+        }
         tx.pragma_update(None, "user_version", SQLITE_VERSION)?;
     }
     Ok(original)
@@ -187,8 +247,13 @@ mod tests {
         {
             let db = Connection::open(dir.path().join("index.sqlite")).unwrap();
             db.execute_batch("PRAGMA journal_mode=WAL;
-                CREATE TABLE blocks(height INTEGER PRIMARY KEY,hash TEXT UNIQUE NOT NULL,json TEXT NOT NULL);
-                INSERT INTO blocks VALUES(7,'block7','{\"transactions\":3}');").unwrap();
+                CREATE TABLE blocks(height INTEGER PRIMARY KEY,hash TEXT UNIQUE NOT NULL,record BLOB NOT NULL);
+                PRAGMA application_id=1397113651;").unwrap();
+            db.execute(
+                "INSERT INTO blocks VALUES(7,'block7',?1)",
+                [crate::codec::to_vec(&serde_json::json!({"transactions":3})).unwrap()],
+            )
+            .unwrap();
         }
         struct ChildGuard(std::process::Child);
         impl Drop for ChildGuard {

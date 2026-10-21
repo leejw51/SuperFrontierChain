@@ -1,0 +1,3 @@
+[env]
+# MLX's compiled GPU library stays with the local build artifacts.
+MLX_RS_METAL_PATH = { value = "target/mlx-native/0.32.2", relative = true }

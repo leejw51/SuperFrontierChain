@@ -2,6 +2,7 @@
 """Two-node backend routing, ordered HTTP batches, GPU worker faults and recovery."""
 import argparse
 import json
+import sfc_codec as codec
 import os
 import pathlib
 import signal
@@ -34,11 +35,13 @@ def run(binary, fixture, modes):
             network.start()
             network.close()
             for i, mode in enumerate(modes):
-                path = pathlib.Path(tmp)/f'node-{i}/config.json'
-                config = json.loads(path.read_text())
+                path = pathlib.Path(tmp)/f'node-{i}/config.capnp'
+                config = codec.loads(path.read_bytes())
                 assert config['verification']['backend'] == 'gpu', 'init must default to GPU'
-                config['verification'].update(backend=mode, timeout_seconds=2)
-                path.write_text(json.dumps(config))
+                # Legacy worker fault tests are opt-in. Native Rust/Metal has no
+                # worker PID; its production path is covered by Rust tests.
+                config['verification'].update(backend=mode, timeout_seconds=2, gpu_runtime='mlx')
+                path.write_bytes(codec.dumps(config))
             # No CLI override: exercise persisted configuration and GPU default.
             network = Supervisor(tmp, binary, nodes=2)
             network.start()
@@ -121,7 +124,7 @@ def run(binary, fixture, modes):
                 assert int(rpc(url,'eth_getTransactionCount',[fixture['owner'],'latest']),16) == nonce
             print('PASS:', '/'.join(modes), 'ordered legacy/type-2 HTTP batch, routing counters, applicable worker faults, node recovery, matching state', flush=True)
         except BaseException:
-            for path in pathlib.Path(tmp).glob('node-*/node.jsonl'):
+            for path in pathlib.Path(tmp).glob('node-*/node.log'):
                 print(path, path.read_text()[-5000:])
             raise
         finally:
@@ -136,7 +139,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', default=str(ROOT/'target/release/sfc'))
     args=parser.parse_args()
-    fixture=json.loads(subprocess.check_output(['node','scripts/network_fixture.mjs','1030'], cwd=ROOT, text=True))
+    fixture=codec.loads(subprocess.check_output(['node','scripts/network_fixture.mjs','1030'], cwd=ROOT))
     for modes in (['cpu','cpu'],['gpu','gpu'],['hybrid','hybrid'],['gpu','cpu']):
         run(args.binary,fixture,modes)
 

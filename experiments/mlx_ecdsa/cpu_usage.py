@@ -5,7 +5,10 @@ from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
-import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+import sfc_codec as codec
 import os
 from pathlib import Path
 import platform
@@ -27,7 +30,7 @@ BATCH = 4096
 class Worker:
     def __init__(self, command, threads=1):
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        text=True, env=dict(os.environ, RAYON_NUM_THREADS=str(threads)))
+                                        env=dict(os.environ, RAYON_NUM_THREADS=str(threads)))
         try:
             self.ready = self.read()
             assert self.ready['ready']
@@ -36,16 +39,15 @@ class Worker:
             raise
 
     def send(self, value):
-        self.process.stdin.write(json.dumps(value) + '\n')
+        codec.append(self.process.stdin, value)
         self.process.stdin.flush()
 
     def read(self):
         if not select.select([self.process.stdout], [], [], 60)[0]:
             raise TimeoutError('benchmark worker did not respond within 60 seconds')
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError(f'benchmark worker exited: {self.process.poll()}')
-        return json.loads(line)
+        value = next(codec.records(self.process.stdout), None)
+        if value is None: raise RuntimeError(f'benchmark worker exited: {self.process.poll()}')
+        return value
 
     def request(self, value):
         self.send(value)
@@ -100,7 +102,7 @@ def describe(row):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT/'target/mlx-ecdsa/cpu-usage.json')
+    parser.add_argument('--output', type=Path, default=ROOT/'target/mlx-ecdsa/cpu-usage.capnp')
     parser.add_argument('--trials', type=int, default=3)
     parser.add_argument('--batches', type=int, default=32)
     parser.add_argument('--rate', type=float, default=40000)
@@ -108,10 +110,10 @@ def main():
     if not 1 <= args.trials <= 10 or not 1 <= args.batches <= 128 or not 10000 <= args.rate <= 100000:
         parser.error('require trials 1..10, batches 1..128, rate 10000..100000')
     oracle = ROOT/'target/release/examples/ecdsa_oracle'
-    fixture = ROOT/'target/mlx-ecdsa/cpu-usage-fixtures.json'
+    fixture = ROOT/'target/mlx-ecdsa/cpu-usage-fixtures.capnp'
     fixture.parent.mkdir(parents=True, exist_ok=True)
     fixture.write_bytes(subprocess.check_output([oracle, 'generate', str(BATCH)]))
-    cases = json.loads(fixture.read_bytes())
+    cases = codec.loads(fixture.read_bytes())
     gpu = Recovery()
     validation = validate(cases, gpu)
     cases = cases[:BATCH]
@@ -201,7 +203,7 @@ def main():
                                     gpu_host_cpu_seconds=cpu, evm=evm_result,
                                     recoveries=BATCH, result_verified=True))
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, indent=2)+'\n')
+        codec.write(args.output, report)
         print(f'Report: {args.output}', flush=True)
 
 

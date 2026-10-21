@@ -16,5 +16,5 @@ fn statistics_use_committed_transactions_and_timestamp_intervals() {
     assert_eq!(value["pendingTransactions"], 0);
     assert_eq!(value["windowTransactions"], 1);
     assert_eq!(value["recentBlocks"][0]["transactions"], 1);
-    assert_eq!(value["syncTransport"], "http3");
+    assert_eq!(value["syncTransport"], "tcp");
 }

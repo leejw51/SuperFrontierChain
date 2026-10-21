@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Live pruned sequencer and archive follower, managed by Python supervisor."""
-import json
+import sfc_codec as codec
 import pathlib
 import tempfile
 import time
@@ -16,10 +16,10 @@ def main():
             network.start()
             network.close()
             for i, retention in enumerate([{'mode': 'pruned', 'seconds': 3}, {'mode': 'archive'}]):
-                path = home / f'node-{i}/config.json'
-                config = json.loads(path.read_text())
+                path = home / f'node-{i}/config.capnp'
+                config = codec.loads(path.read_bytes())
                 config['retention'] = retention
-                path.write_text(json.dumps(config))
+                path.write_bytes(codec.dumps(config))
             network = Supervisor(home, ROOT / 'target/debug/sfc', nodes=2)
             network.start()
             urls = ['http://' + n['config']['rpc_listen'] for n in network.nodes]

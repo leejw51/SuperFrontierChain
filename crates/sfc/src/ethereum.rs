@@ -15,7 +15,7 @@ use rlp::{Rlp, RlpStream};
 #[derive(Clone, Debug)]
 pub struct Transaction {
     pub hash: Hash,
-    pub raw: Vec<u8>,
+    pub raw: bytes::Bytes,
     pub env: TxEnv,
     pub tx_type: u8,
 }
@@ -104,6 +104,19 @@ impl Transaction {
         Ok(prepared.finish(key))
     }
     pub(crate) fn prepare(raw: &[u8], expected_chain: u64) -> Result<PreparedTransaction> {
+        let mut tx = Self::prepare_fields(raw, expected_chain)?;
+        tx.transaction.raw = bytes::Bytes::copy_from_slice(raw);
+        Ok(tx)
+    }
+    pub(crate) fn prepare_shared(
+        raw: bytes::Bytes,
+        expected_chain: u64,
+    ) -> Result<PreparedTransaction> {
+        let mut tx = Self::prepare_fields(&raw, expected_chain)?;
+        tx.transaction.raw = raw;
+        Ok(tx)
+    }
+    fn prepare_fields(raw: &[u8], expected_chain: u64) -> Result<PreparedTransaction> {
         ensure!(
             !raw.is_empty() && raw.len() <= MAX_TX_BYTES,
             "invalid transaction size"
@@ -183,13 +196,13 @@ impl Transaction {
         );
         Ok(PreparedTransaction {
             recovery: crate::verification::RecoveryInput {
-                digest: hex::encode(hash(&signing_bytes)),
-                signature: hex::encode(signature.to_bytes()),
+                digest: hash(&signing_bytes),
+                signature: signature.to_bytes().into(),
                 parity: parity as u8,
             },
             transaction: Self {
                 hash: hash(raw),
-                raw: raw.to_vec(),
+                raw: bytes::Bytes::new(),
                 env,
                 tx_type: if typed { 2 } else { 0 },
             },

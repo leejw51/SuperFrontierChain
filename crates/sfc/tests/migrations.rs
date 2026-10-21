@@ -18,6 +18,66 @@ use std::sync::{Arc, Mutex};
 const VERSION: &[u8] = b"meta/schema_version";
 
 #[test]
+fn protocol_one_databases_are_rejected_without_rewriting_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rocksdb");
+    {
+        let db = DB::open_default(&path).unwrap();
+        db.put(b"genesis", b"{\"chain_id\":7777}").unwrap();
+        db.put(b"world", b"old protocol state").unwrap();
+        db.put(VERSION, b"1").unwrap();
+    }
+    let error = Store::open(dir.path(), Retention::Archive, &common::genesis())
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("protocol-v3"));
+    let db = DB::open_default(&path).unwrap();
+    assert_eq!(db.get(b"world").unwrap().unwrap(), b"old protocol state");
+    assert_eq!(db.get(VERSION).unwrap().unwrap(), b"1");
+    assert!(db.get(b"meta/protocol_version").unwrap().is_none());
+
+    let node_home = tempfile::tempdir().unwrap();
+    let config = common::config(node_home.path());
+    let data = config.data_dir.clone();
+    let node = Arc::new(Mutex::new(
+        Node::open(config, Application::default()).unwrap(),
+    ));
+    let db = Connection::open(data.join("index.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE blocks(height INTEGER PRIMARY KEY,json TEXT);
+        INSERT INTO blocks VALUES(1,'old protocol block');
+        PRAGMA user_version=2;",
+    )
+    .unwrap();
+    assert!(Indexer::start(node, data)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("legacy SQLite"));
+    assert_eq!(
+        db.query_row("SELECT json FROM blocks", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "old protocol block"
+    );
+}
+
+#[test]
+fn init_refuses_legacy_home_before_writing_new_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("config.json");
+    std::fs::write(&old, b"preserve old config").unwrap();
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_sfc"))
+        .args(["init", "--home"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("preserve this home"));
+    assert_eq!(std::fs::read(&old).unwrap(), b"preserve old config");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
 #[ignore = "subprocess helper killed after durable RocksDB migration"]
 fn rocksdb_migration_crash_worker() {
     let home = std::path::PathBuf::from(std::env::var_os("SFC_MIGRATION_TEST_HOME").unwrap());
@@ -41,7 +101,7 @@ fn rocksdb_migration_survives_process_kill_without_close() {
         let db = DB::open_default(home.join("rocksdb")).unwrap();
         let mut batch = WriteBatch::default();
         batch.delete(VERSION);
-        batch.put(b"world", serde_json::to_vec(&world).unwrap());
+        batch.put(b"world", sfc::codec::to_vec(&world).unwrap());
         for address in world.accounts.keys() {
             batch.delete(format!("account/{address}"));
         }
@@ -111,12 +171,12 @@ fn rocksdb_legacy_accounts_migrate_without_changing_chain_and_reopen() {
     {
         let db = DB::open_default(&path).unwrap();
         encoded_block = db
-            .get(format!("block/{:020}", block.height))
+            .get(format!("block/{:020}", block.height()))
             .unwrap()
             .unwrap();
         let mut batch = WriteBatch::default();
         batch.delete(VERSION);
-        batch.put(b"world", serde_json::to_vec(&world).unwrap());
+        batch.put(b"world", sfc::codec::to_vec(&world).unwrap());
         for address in world.accounts.keys() {
             batch.delete(format!("account/{address}"));
         }
@@ -134,13 +194,13 @@ fn rocksdb_legacy_accounts_migrate_without_changing_chain_and_reopen() {
     }
     let db = DB::open_default(&path).unwrap();
     assert_eq!(
-        db.get(format!("block/{:020}", block.height))
+        db.get(format!("block/{:020}", block.height()))
             .unwrap()
             .unwrap(),
         encoded_block
     );
     let metadata: sfc::types::World =
-        serde_json::from_slice(&db.get(b"world").unwrap().unwrap()).unwrap();
+        sfc::codec::from_slice(&db.get(b"world").unwrap().unwrap()).unwrap();
     assert!(metadata.accounts.is_empty());
     assert!(db
         .get(format!("account/{:#x}", common::sender()))
@@ -156,7 +216,8 @@ fn rocksdb_rejects_newer_versions_and_failed_migration_is_retryable() {
     let path = dir.path().join("rocksdb");
     {
         let db = DB::open_default(&path).unwrap();
-        db.put(VERSION, b"999").unwrap();
+        db.put(VERSION, sfc::codec::to_vec(&999u32).unwrap())
+            .unwrap();
     }
     assert!(Store::open(dir.path(), Retention::Archive, &genesis)
         .err()
@@ -166,7 +227,10 @@ fn rocksdb_rejects_newer_versions_and_failed_migration_is_retryable() {
     let world;
     {
         let db = DB::open_default(&path).unwrap();
-        assert_eq!(db.get(VERSION).unwrap().unwrap(), b"999");
+        assert_eq!(
+            sfc::codec::from_slice::<u32>(&db.get(VERSION).unwrap().unwrap()).unwrap(),
+            999
+        );
         db.delete(VERSION).unwrap();
         world = db.get(b"world").unwrap().unwrap();
         db.put(b"world", b"broken").unwrap();
@@ -202,10 +266,11 @@ fn signer_migration_preserves_double_sign_protection() {
     {
         let db = DB::open_default(dir.path()).unwrap();
         assert_eq!(
-            serde_json::from_slice::<u32>(&db.get(VERSION).unwrap().unwrap()).unwrap(),
+            sfc::codec::from_slice::<u32>(&db.get(VERSION).unwrap().unwrap()).unwrap(),
             SIGNER_VERSION
         );
-        db.put(VERSION, b"999").unwrap();
+        db.put(VERSION, sfc::codec::to_vec(&999u32).unwrap())
+            .unwrap();
     }
     assert!(DurableSigner::open(dir.path(), 7777, key)
         .err()
@@ -219,24 +284,29 @@ fn legacy_sqlite(db: &Connection, version: u32) {
         "PRAGMA journal_mode=WAL;
          CREATE TABLE meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);
          INSERT INTO meta VALUES ('height',99),('log_offset',123),('logs',1),('transactions',1),('skipped_blocks',7);
-         CREATE TABLE blocks(height INTEGER PRIMARY KEY,hash TEXT UNIQUE NOT NULL,json TEXT NOT NULL);
+         CREATE TABLE blocks(height INTEGER PRIMARY KEY,hash TEXT UNIQUE NOT NULL,record BLOB NOT NULL);
          CREATE TABLE transactions(hash TEXT PRIMARY KEY,height INTEGER NOT NULL,position INTEGER NOT NULL,
-            sender TEXT NOT NULL,recipient TEXT,raw TEXT NOT NULL,receipt TEXT NOT NULL);
-         INSERT INTO transactions VALUES ('tx1',99,0,'sender','recipient','preserve signed bytes','preserve receipt');
-         CREATE VIRTUAL TABLE logs USING fts5(timestamp_ms UNINDEXED,level,event,record);
-         INSERT INTO logs VALUES(1,'info','old_event','{\"timestamp_ms\":1}');"
+            sender TEXT NOT NULL,recipient TEXT,raw BLOB NOT NULL,receipt BLOB NOT NULL);
+         INSERT INTO transactions VALUES ('tx1',99,0,'sender','recipient',CAST('preserve signed bytes' AS BLOB),CAST('preserve receipt' AS BLOB));
+         CREATE VIRTUAL TABLE logs USING fts5(timestamp_ms UNINDEXED,level,event,message,record UNINDEXED);
+         INSERT INTO logs VALUES(1,'info','old_event','old event',NULL);"
     ).unwrap();
     db.execute(
         "INSERT INTO blocks VALUES(99,'b99',?1)",
-        [json!({"height":99,"transactions":1}).to_string()],
+        [sfc::codec::to_vec(&json!({"height":99,"transactions":1})).unwrap()],
     )
     .unwrap();
+    if version == 2 {
+        db.execute_batch("ALTER TABLE blocks ADD COLUMN transaction_count INTEGER NOT NULL DEFAULT 0; UPDATE blocks SET transaction_count=1; CREATE INDEX populated_blocks ON blocks(height DESC) WHERE transaction_count>0;").unwrap();
+    }
+    db.pragma_update(None, "application_id", 0x53464333)
+        .unwrap();
     db.pragma_update(None, "user_version", version).unwrap();
 }
 
 #[test]
-fn sqlite_upgrades_unversioned_and_v1_preserving_rows_cursors_and_wal() {
-    for version in [0, 1] {
+fn sqlite_upgrades_all_older_versions_preserving_rows_cursors_and_wal() {
+    for version in [0, 1, 2] {
         let dir = tempfile::tempdir().unwrap();
         let config = common::config(dir.path());
         let data = config.data_dir.clone();
@@ -268,15 +338,15 @@ fn sqlite_upgrades_unversioned_and_v1_preserving_rows_cursors_and_wal() {
             );
             assert_eq!(
                 db.query_row("SELECT raw FROM transactions", [], |r| r
-                    .get::<_, String>(0))
+                    .get::<_, Vec<u8>>(0))
                     .unwrap(),
-                "preserve signed bytes"
+                b"preserve signed bytes"
             );
             assert_eq!(
                 db.query_row("SELECT receipt FROM transactions", [], |r| r
-                    .get::<_, String>(0))
+                    .get::<_, Vec<u8>>(0))
                     .unwrap(),
-                "preserve receipt"
+                b"preserve receipt"
             );
             assert_eq!(
                 db.query_row("SELECT value FROM meta WHERE key='log_offset'", [], |r| r
@@ -310,8 +380,7 @@ fn sqlite_failed_backfill_rolls_back_ddl_and_version_then_retries() {
     ));
     let db = Connection::open(data.join("index.sqlite")).unwrap();
     legacy_sqlite(&db, 0);
-    db.execute("UPDATE blocks SET json='malformed'", [])
-        .unwrap();
+    db.execute("UPDATE blocks SET record=X'00'", []).unwrap();
     assert!(Indexer::start(node.clone(), data.clone()).is_err());
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
@@ -319,8 +388,11 @@ fn sqlite_failed_backfill_rolls_back_ddl_and_version_then_retries() {
         0
     );
     assert!(db.prepare("SELECT transaction_count FROM blocks").is_err());
-    db.execute("UPDATE blocks SET json='{\"transactions\":1}'", [])
-        .unwrap();
+    db.execute(
+        "UPDATE blocks SET record=?1",
+        [sfc::codec::to_vec(&json!({"transactions":1})).unwrap()],
+    )
+    .unwrap();
     drop(Indexer::start(node.clone(), data.clone()).unwrap());
     db.pragma_update(None, "user_version", 999).unwrap();
     assert!(Indexer::start(node, data)
@@ -339,4 +411,106 @@ fn sqlite_failed_backfill_rolls_back_ddl_and_version_then_retries() {
             .unwrap(),
         1
     );
+}
+
+#[test]
+fn typed_metadata_upgrade_preserves_v3_commitments_and_signer_guard() {
+    let home = tempfile::tempdir().unwrap();
+    let genesis = common::genesis();
+    let store = Store::open(home.path(), Retention::Archive, &genesis).unwrap();
+    let original = store.head().unwrap();
+    let root = store.world().unwrap().root();
+    drop(store);
+    {
+        let db = DB::open_default(home.path().join("rocksdb")).unwrap();
+        db.put(
+            b"genesis",
+            sfc::codec::to_vec(&serde_json::to_value(&genesis).unwrap()).unwrap(),
+        )
+        .unwrap();
+        db.put(b"head", sfc::codec::to_vec(&json!(0)).unwrap())
+            .unwrap();
+        db.put(VERSION, sfc::codec::to_vec(&json!(1)).unwrap())
+            .unwrap();
+    }
+    for _ in 0..2 {
+        let store = Store::open(home.path(), Retention::Archive, &genesis).unwrap();
+        assert_eq!(store.head().unwrap().as_bytes(), original.as_bytes());
+        assert_eq!(store.world().unwrap().root(), root);
+    }
+    let signer_home = home.path().join("signer");
+    let key = SigningKey::from_bytes(&[7; 32]);
+    let validator = key.verifying_key().to_bytes();
+    let mut signer = DurableSigner::open(&signer_home, 7777, key.clone()).unwrap();
+    let vote = signer
+        .sign(1, 0, Phase::Precommit, Some(original.hash()))
+        .unwrap();
+    drop(signer);
+    {
+        let db = DB::open_default(&signer_home).unwrap();
+        db.put(
+            b"identity",
+            sfc::codec::to_vec(&json!([7777, validator])).unwrap(),
+        )
+        .unwrap();
+        db.put(
+            b"last_vote",
+            sfc::codec::to_vec(&serde_json::to_value(&vote).unwrap()).unwrap(),
+        )
+        .unwrap();
+        db.put(VERSION, sfc::codec::to_vec(&json!(1)).unwrap())
+            .unwrap();
+    }
+    let mut signer = DurableSigner::open(&signer_home, 7777, key).unwrap();
+    assert_eq!(
+        signer
+            .sign(1, 0, Phase::Precommit, Some(original.hash()))
+            .unwrap(),
+        vote
+    );
+    assert!(signer.sign(1, 0, Phase::Precommit, Some([0; 32])).is_err());
+}
+
+#[test]
+fn configuration_upgrade_is_atomic_idempotent_and_rejects_future_version() {
+    let home = tempfile::tempdir().unwrap();
+    let config = common::config(home.path());
+    let path = home.path().join("config.capnp");
+    let before = serde_json::to_value(&config).unwrap();
+    std::fs::write(&path, sfc::codec::to_vec(&before).unwrap()).unwrap();
+    for _ in 0..2 {
+        let restored: sfc::config::Config = sfc::codec::upgrade_file(&path).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), before);
+    }
+    let mut message = capnp::message::Builder::new_default();
+    let mut root = message.init_root::<sfc::runtime_capnp::record::Builder>();
+    root.set_magic(0x5346435245433031);
+    root.set_version(999);
+    root.init_config();
+    let future = capnp::serialize::write_message_to_words(&message);
+    std::fs::write(&path, &future).unwrap();
+    assert!(sfc::codec::upgrade_file::<sfc::config::Config>(&path).is_err());
+    assert_eq!(std::fs::read(path).unwrap(), future);
+}
+
+#[test]
+fn rejected_older_protocol_does_not_upgrade_genesis_file() {
+    let home = tempfile::tempdir().unwrap();
+    let config = common::config(home.path());
+    let original = sfc::codec::to_vec(&serde_json::to_value(common::genesis()).unwrap()).unwrap();
+    std::fs::write(&config.genesis, &original).unwrap();
+    let store = Store::open(&config.data_dir, Retention::Archive, &common::genesis()).unwrap();
+    drop(store);
+    {
+        let db = DB::open_default(config.data_dir.join("rocksdb")).unwrap();
+        db.put(b"meta/protocol_version", 2u32.to_le_bytes())
+            .unwrap();
+    }
+    let genesis_path = config.genesis.clone();
+    assert!(Node::open(config, Application::default())
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("protocol-v3"));
+    assert_eq!(std::fs::read(genesis_path).unwrap(), original);
 }

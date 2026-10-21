@@ -82,28 +82,25 @@ async fn handle(State(node): State<Arc<Mutex<Node>>>, body: Bytes) -> Response {
                 Err(_) => return Some(error(Value::Null, -32603, "node unavailable")),
             };
             // Authenticate outside the node mutex, then admit in original request order.
-            let raw: Vec<_> = batch
-                .iter()
-                .map(|item| {
-                    (valid_request(item)
-                        && item["method"] == "eth_sendRawTransaction"
-                        && item.get("params").is_none_or(Value::is_array))
-                    .then(|| {
-                        let raw = data(text(&item["params"], 0).unwrap_or(""))?;
-                        ensure!(
-                            raw.len() <= crate::types::MAX_TX_BYTES,
-                            "invalid transaction size"
-                        );
-                        Ok(raw)
-                    })
+            let raw = ethereum::ordered_map(batch, |item| {
+                (valid_request(item)
+                    && item["method"] == "eth_sendRawTransaction"
+                    && item.get("params").is_none_or(Value::is_array))
+                .then(|| {
+                    let raw = data(text(&item["params"], 0).unwrap_or(""))?;
+                    ensure!(
+                        raw.len() <= crate::types::MAX_TX_BYTES,
+                        "invalid transaction size"
+                    );
+                    Ok(Bytes::from(raw))
                 })
-                .collect();
+            });
             let bytes: Vec<_> = raw
                 .iter()
-                .filter_map(|item| item.as_ref()?.as_ref().ok())
+                .filter_map(|item| item.as_ref()?.as_ref().ok().cloned())
                 .collect();
             let decoded = if accepts_transactions {
-                verifier.decode_batch(&bytes, chain_id)
+                verifier.decode_shared(&bytes, chain_id)
             } else {
                 Err(anyhow::anyhow!(
                     "follower is read-only; submit to the sequencer"
@@ -261,19 +258,23 @@ fn latest_tag(params: &Value, index: usize) -> Result<()> {
 }
 fn block_number(node: &Node, value: &str) -> Result<u64> {
     match value {
-        "latest" => Ok(node.head().height),
+        "latest" => Ok(node.head().height()),
         "earliest" => Ok(node.store.earliest_height()?),
         "pending" | "safe" | "finalized" => bail!("block tag unsupported by development sequencer"),
         _ => Ok(u64::try_from(quantity(value)?)?),
     }
 }
-fn block_json(node: &Node, block: &Block) -> Value {
-    json!({"number":format!("0x{:x}",block.height), "hash":hex_hash(&block.hash()),
-        "parentHash":hex_hash(&block.parent_hash), "timestamp":format!("0x{:x}",block.timestamp),
-        "stateRoot":hex_hash(&block.state_root), "gasLimit":format!("0x{:x}",node.genesis.gas_limit),
-        "gasUsed":format!("0x{:x}",block.receipts.last().map(|r|r.cumulative_gas_used).unwrap_or(0)),
-        "baseFeePerGas":"0x0", "transactions":block.receipts.iter().map(|r|hex_hash(&r.transaction_hash)).collect::<Vec<_>>(),
-        "uncles":[], "miner":format!("{:#x}",Address::ZERO), "extraData":"0x", "difficulty":"0x0"})
+fn block_json(node: &Node, block: &Block) -> Result<Value> {
+    let message = block.read()?;
+    let root = message.get_root::<crate::storage_capnp::block::Reader>()?;
+    Ok(
+        json!({"number":format!("0x{:x}",block.height()), "hash":hex_hash(&block.hash()),
+        "parentHash":hex_hash(&block.parent_hash()), "timestamp":format!("0x{:x}",block.timestamp()),
+        "stateRoot":hex_hash(&block.state_root()), "gasLimit":format!("0x{:x}",node.genesis.gas_limit),
+        "gasUsed":format!("0x{:x}",block.gas_used()),
+        "baseFeePerGas":"0x0", "transactions":root.get_receipts()?.iter().map(|r|Ok(format!("0x{}",hex::encode(r.get_transaction_hash()?)))).collect::<Result<Vec<_>>>()?,
+        "uncles":[], "miner":format!("{:#x}",Address::ZERO), "extraData":"0x", "difficulty":"0x0"}),
+    )
 }
 pub fn call(node: &mut Node, method: &str, params: &Value) -> Result<Value> {
     match method {
@@ -286,7 +287,7 @@ pub fn call(node: &mut Node, method: &str, params: &Value) -> Result<Value> {
         "net_listening" => Ok(json!(true)),
         "net_peerCount" => Ok(json!("0x0")),
         "eth_chainId" => Ok(json!(format!("0x{:x}", node.genesis.chain_id))),
-        "eth_blockNumber" => Ok(json!(format!("0x{:x}", node.head().height))),
+        "eth_blockNumber" => Ok(json!(format!("0x{:x}", node.head().height()))),
         "eth_syncing" => Ok(json!(false)),
         "eth_accounts" => Ok(json!([])),
         "eth_gasPrice" | "eth_maxPriorityFeePerGas" => Ok(json!("0x1")),
@@ -337,6 +338,7 @@ pub fn call(node: &mut Node, method: &str, params: &Value) -> Result<Value> {
                 .store
                 .block(height)?
                 .map(|block| block_json(node, &block))
+                .transpose()?
                 .unwrap_or(Value::Null))
         }
         "eth_getTransactionReceipt" => {
@@ -345,36 +347,40 @@ pub fn call(node: &mut Node, method: &str, params: &Value) -> Result<Value> {
             if let Some(block) = node.store.receipt_block(&target)? {
                 let block_hash = hex_hash(&block.hash());
                 let mut log_index = 0usize;
-                for (index, receipt) in block.receipts.iter().enumerate() {
-                    if receipt.transaction_hash.as_slice() != target {
-                        log_index += receipt.logs.len();
+                let message = block.read()?;
+                let root = message.get_root::<crate::storage_capnp::block::Reader>()?;
+                for (index, receipt) in root.get_receipts()?.iter().enumerate() {
+                    if receipt.get_transaction_hash()? != target {
+                        log_index += receipt.get_logs()?.len() as usize;
                         continue;
                     }
                     let tx = Transaction::prepare(
-                        &data(&block.transactions[index])?,
+                        root.get_transactions()?.get(index as u32)?,
                         node.genesis.chain_id,
                     )?
                     .transaction;
                     let mut bloom = [0u8; 256];
-                    let logs: Vec<_> = receipt.logs.iter().enumerate().map(|(i,log)| {
-                        for bytes in std::iter::once(data(&log.address).unwrap()).chain(log.topics.iter().map(|t|data(t).unwrap())) {
-                            let digest = crate::types::hash(&bytes);
-                            for j in [0,2,4] { let bit = ((digest[j] as usize)<<8 | digest[j+1] as usize) & 2047; bloom[255-bit/8] |= 1 << (bit%8); }
+                    let logs: Vec<_> = receipt.get_logs()?.iter().enumerate().map(|(i,log)| -> Result<Value> {
+                        let address=log.get_address()?.to_str()?;
+                        let topics=log.get_topics()?.iter().map(|t|Ok(t?.to_str()?)).collect::<Result<Vec<_>>>()?;
+                        for bytes in std::iter::once(data(address)?).chain(topics.iter().map(|t|data(t)).collect::<Result<Vec<_>>>()?) {
+                            let digest=crate::types::hash(&bytes);
+                            for j in [0,2,4] {let bit=((digest[j] as usize)<<8|digest[j+1] as usize)&2047;bloom[255-bit/8]|=1<<(bit%8);}
                         }
-                        json!({"address":log.address,"topics":log.topics,"data":log.data,"blockNumber":format!("0x{:x}",block.height),
-                            "blockHash":block_hash,"transactionHash":hex_hash(&receipt.transaction_hash),"transactionIndex":format!("0x{index:x}"),"logIndex":format!("0x{:x}",log_index+i),"removed":false})
-                    }).collect();
+                        Ok(json!({"address":address,"topics":topics,"data":format!("0x{}",hex::encode(log.get_data()?)),"blockNumber":format!("0x{:x}",block.height()),
+                            "blockHash":block_hash,"transactionHash":format!("0x{}",hex::encode(receipt.get_transaction_hash()?)),"transactionIndex":format!("0x{index:x}"),"logIndex":format!("0x{:x}",log_index+i),"removed":false}))
+                    }).collect::<Result<_>>()?;
                     let effective_price = tx
                         .env
                         .gas_priority_fee
                         .map(|p| p.min(tx.env.gas_price))
                         .unwrap_or(tx.env.gas_price);
                     return Ok(
-                        json!({"transactionHash":hex_hash(&receipt.transaction_hash),"transactionIndex":format!("0x{index:x}"),
-                        "blockHash":block_hash,"blockNumber":format!("0x{:x}",block.height),
-                        "from":receipt.from,"to":receipt.to,"status":if receipt.success {"0x1"} else {"0x0"},
-                        "gasUsed":format!("0x{:x}",receipt.gas_used),"cumulativeGasUsed":format!("0x{:x}",receipt.cumulative_gas_used),
-                        "contractAddress":receipt.contract_address,"logs":logs,"logsBloom":format!("0x{}",hex::encode(bloom)),
+                        json!({"transactionHash":format!("0x{}",hex::encode(receipt.get_transaction_hash()?)),"transactionIndex":format!("0x{index:x}"),
+                        "blockHash":block_hash,"blockNumber":format!("0x{:x}",block.height()),
+                        "from":receipt.get_sender()?.to_str()?,"to":if receipt.get_has_recipient(){Some(receipt.get_recipient()?.to_str()?)}else{None},"status":if receipt.get_success() {"0x1"} else {"0x0"},
+                        "gasUsed":format!("0x{:x}",receipt.get_gas_used()),"cumulativeGasUsed":format!("0x{:x}",receipt.get_cumulative_gas_used()),
+                        "contractAddress":if receipt.get_has_contract_address(){Some(receipt.get_contract_address()?.to_str()?)}else{None},"logs":logs,"logsBloom":format!("0x{}",hex::encode(bloom)),
                         "effectiveGasPrice":format!("0x{effective_price:x}"),"type":format!("0x{:x}",tx.tx_type)}),
                     );
                 }
@@ -445,7 +451,7 @@ pub fn call(node: &mut Node, method: &str, params: &Value) -> Result<Value> {
             };
             let head = node.head();
             let mut db = ethereum::load_db(node.world()?)?;
-            let context = node.context(head.height, head.timestamp);
+            let context = node.context(head.height(), head.timestamp());
             let result = ethereum::simulate(&mut db, env.clone(), context)?;
             if method == "eth_call" {
                 return Ok(json!(format!(
@@ -472,6 +478,20 @@ pub fn call(node: &mut Node, method: &str, params: &Value) -> Result<Value> {
     }
 }
 
+fn capnp_response(value: &Value) -> Response {
+    match crate::codec::to_vec(value) {
+        Ok(bytes) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "application/x-capnp"),
+                (axum::http::header::CACHE_CONTROL, "no-store"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "encoding failed").into_response(),
+    }
+}
+
 async fn dashboard_stats(State(node): State<Arc<Mutex<Node>>>) -> Response {
     let result = tokio::task::spawn_blocking(move || {
         let mut value = {
@@ -484,16 +504,18 @@ async fn dashboard_stats(State(node): State<Arc<Mutex<Node>>>) -> Response {
             .as_u64()
             .map(|pid| pid as u32);
         value["host"] = crate::telemetry::sample(worker);
+        value["host"]["indexerThreads"] = u32::from(
+            value["runtime"]["sqliteIndexerEnabled"]
+                .as_bool()
+                .unwrap_or(true),
+        )
+        .into();
         Ok::<_, anyhow::Error>(value)
     })
     .await;
     let mut response = match result {
-        Ok(Ok(stats)) => Json(stats).into_response(),
-        _ => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error":"statistics unavailable"})),
-        )
-            .into_response(),
+        Ok(Ok(stats)) => capnp_response(&stats),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "statistics unavailable").into_response(),
     };
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,
@@ -519,7 +541,7 @@ async fn dashboard_index(
     {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error":"invalid index kind or query exceeds 256 bytes"})),
+            "invalid index kind or query exceeds 256 bytes",
         )
             .into_response();
     }
@@ -534,12 +556,8 @@ async fn dashboard_index(
     })
     .await;
     let mut response = match result {
-        Ok(Ok(value)) => Json(value).into_response(),
-        _ => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error":"index unavailable"})),
-        )
-            .into_response(),
+        Ok(Ok(value)) => capnp_response(&value),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "index unavailable").into_response(),
     };
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,

@@ -3,6 +3,7 @@
 import argparse
 import contextlib
 import json
+import sfc_codec as codec
 import pathlib
 import select
 import signal
@@ -105,10 +106,10 @@ class Network:
         self.until(lambda: self.height(0) >= 2 and self.height(1) >= 2)
 
     def configure(self, index, **fields):
-        path = self.home / f'node-{index}/config.json'
-        config = json.loads(path.read_text())
+        path = self.home / f'node-{index}/config.capnp'
+        config = codec.loads(path.read_bytes())
         config.update(fields)
-        path.write_text(json.dumps(config))
+        path.write_bytes(codec.dumps(config))
         return config
 
     def remember(self):
@@ -191,7 +192,7 @@ class Network:
                 assert int(rpc(url, 'eth_getStorageAt', [self.fixture['contract'], '0x0', 'latest']), 16) == 42
 
     def log(self, index):
-        return (self.home / f'node-{index}/node.jsonl').read_text()
+        return (self.home / f'node-{index}/node.log').read_text()
 
     def close(self):
         # SIGCONT makes cleanup safe even if an assertion interrupted a freeze test.
@@ -212,7 +213,7 @@ def running(fixture, retention=None):
             network.start(retention)
             yield network
         except BaseException:
-            for path in pathlib.Path(tmp).glob('node-*/node.jsonl'):
+            for path in pathlib.Path(tmp).glob('node-*/node.log'):
                 print(path.name, path.parent.name, path.read_text()[-6000:], flush=True)
             raise
         finally:
@@ -340,9 +341,9 @@ def exercise(fixture, record):
             n.kill(1, hold=True)
             path = pathlib.Path(n.network.nodes[1]['config']['genesis'])
             original = path.read_bytes()
-            changed = json.loads(original)
+            changed = codec.loads(original)
             changed['chain_id'] += 1
-            path.write_text(json.dumps(changed))
+            path.write_bytes(codec.dumps(changed))
             offset = len(n.log(1))
             n.launch(1)
             assert n.process(1).wait(timeout=5) != 0
@@ -405,13 +406,13 @@ def exercise(fixture, record):
         def torn_projection():
             n.kill(1, hold=True)
             history = pathlib.Path(n.network.nodes[1]['config']['data_dir']) / 'history'
-            segment = sorted(history.glob('*.jsonl'))[-1]
-            segment.write_bytes(b'{"torn":')
+            segment = sorted(history.glob('*.capnp'))[-1]
+            segment.write_bytes(b'\x20\x00\x00')
             n.revive(1)
             n.check()
-            lines = [json.loads(line) for line in segment.read_text().splitlines()]
+            lines = list(codec.blocks(segment.open('rb')))
             assert lines and all('state_root' in block for block in lines)
-        record('torn_JSONL_projection_rebuilt_from_durable_database', torn_projection)
+        record('torn_Capnp_projection_rebuilt_from_durable_database', torn_projection)
 
         def restart_exhaustion():
             # Put the follower at its configured budget and make the final death permanent.
@@ -445,7 +446,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=pathlib.Path)
     args = parser.parse_args()
-    fixture = json.loads(subprocess.check_output(['node', 'scripts/network_fixture.mjs', '128'], cwd=ROOT, text=True, timeout=15))
+    fixture = codec.loads(subprocess.check_output(['node', 'scripts/network_fixture.mjs', '128'], cwd=ROOT, timeout=15))
     results = []
     def record(name, test):
         start = time.monotonic()
@@ -464,7 +465,7 @@ def main():
         exercise(fixture, record)
     finally:
         if args.report:
-            args.report.write_text(json.dumps({'nodes': 2, 'transport': 'http3', 'scenarios': results}, indent=2) + '\n')
+            args.report.write_bytes(codec.dumps({'nodes': 2, 'transport': 'http3', 'scenarios': results}, indent=2))
     print(f'PASS: {len(results)} emergency scenarios; all owned node processes cleaned up', flush=True)
 
 

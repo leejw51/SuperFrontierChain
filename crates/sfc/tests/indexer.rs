@@ -34,6 +34,66 @@ fn wait(mut condition: impl FnMut() -> bool) {
 }
 
 #[test]
+fn catchup_batches_roll_back_rows_and_cursors_together_and_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let node = Arc::new(Mutex::new(
+        Node::open(config, Application::default()).unwrap(),
+    ));
+    let index = Indexer::start(node.clone(), data.clone()).unwrap();
+    wait(|| query(&data, "blocks", "")["indexedHeight"] == 0);
+    drop(index);
+    {
+        let mut node = node.lock().unwrap();
+        for nonce in 0..40 {
+            node.submit(&common::transfer(nonce).raw).unwrap();
+            node.produce(1_000_002 + nonce).unwrap();
+        }
+    }
+    let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER fail_index BEFORE INSERT ON blocks WHEN NEW.height=20
+         BEGIN SELECT RAISE(ABORT, 'injected index failure'); END;",
+    )
+    .unwrap();
+    let index = Indexer::start(node.clone(), data.clone()).unwrap();
+    wait(|| data.join("index-error.log").exists());
+    let state = query(&data, "blocks", "");
+    assert_eq!(state["indexedHeight"], 16);
+    assert_eq!(state["indexedTransactions"], 16);
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM blocks", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        17
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM transactions", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        16
+    );
+    drop(index);
+    db.execute_batch("DROP TRIGGER fail_index").unwrap();
+    let _index = Indexer::start(node, data.clone()).unwrap();
+    wait(|| query(&data, "blocks", "")["indexedHeight"] == 40);
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 40);
+    assert_eq!(
+        db.query_row("SELECT count(DISTINCT hash) FROM transactions", [], |r| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        40
+    );
+    assert_eq!(
+        db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "ok"
+    );
+}
+
+#[test]
 fn wal_search_restart_and_concurrent_reader_preserve_exact_records() {
     let dir = tempfile::tempdir().unwrap();
     let config = common::config(dir.path());
@@ -45,9 +105,9 @@ fn wal_search_restart_and_concurrent_reader_preserve_exact_records() {
     let mut log = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(data.join("logs/node.jsonl"))
+        .open(data.join("logs/node.capnp"))
         .unwrap();
-    writeln!(log, "{}", json!({"timestamp_ms":1,"level":"info","event":"recovery_complete","fields":{"message":"worker healthy <script>"}})).unwrap();
+    sfc::codec::write_record(&mut log, &sfc::codec::to_vec(&json!({"timestamp_ms":1,"level":"info","event":"recovery_complete","fields":{"message":"worker healthy <script>"}})).unwrap()).unwrap();
     let tx = common::transfer(0);
     let hash = hex_hash(&tx.hash);
     {
@@ -74,6 +134,7 @@ fn wal_search_restart_and_concurrent_reader_preserve_exact_records() {
         1
     );
     let block = query(&data, "blocks", "1");
+    assert_eq!(block["rows"][0]["gasUsed"], 21000);
     assert_eq!(
         query(&data, "blocks", block["rows"][0]["hash"].as_str().unwrap())["rows"],
         block["rows"]
@@ -93,13 +154,21 @@ fn wal_search_restart_and_concurrent_reader_preserve_exact_records() {
     );
     reader.execute_batch("COMMIT").unwrap();
     drop(index);
-    writeln!(
-        log,
-        "{}",
-        json!({"timestamp_ms":2,"level":"warn","event":"restart_check"})
+    let mut frame = Vec::new();
+    sfc::codec::write_record(
+        &mut frame,
+        &sfc::codec::to_vec(&json!({"timestamp_ms":2,"level":"warn","event":"restart_check"}))
+            .unwrap(),
     )
     .unwrap();
+    log.write_all(&frame[..4]).unwrap();
+    node.lock().unwrap().produce(1_000_004).unwrap();
     let _index = Indexer::start(node, data.clone()).unwrap();
+    wait(|| query(&data, "logs", "")["indexedHeight"] == 3);
+    let partial = query(&data, "logs", "");
+    assert_eq!(partial["indexedLogs"], 1);
+    assert!(partial["error"].is_null());
+    log.write_all(&frame[4..]).unwrap();
     wait(|| query(&data, "logs", "")["indexedLogs"] == 2);
     let all = query(&data, "logs", "");
     assert_eq!(all["indexedTransactions"], 1);

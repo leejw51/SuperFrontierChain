@@ -68,7 +68,7 @@ pub fn sample(worker: Option<u32>) -> Value {
     }
     sampler.value = json!({"processes":processes,"sampleSeconds":elapsed,
         "cpuPercent":if ready {Some(processes.iter().filter_map(|p|p["cpuPercent"].as_f64()).sum::<f64>())} else {None},
-        "cpuDefinition":"100% = one CPU core; Rust node + MLX worker; excludes load generator",
+        "cpuDefinition":if worker.is_some() {"100% = one CPU core; Rust node + legacy MLX worker; excludes load generator"} else {"100% = one CPU core; all Rust node threads including in-process GPU runtime; excludes load generator"},
         "rayonThreads":rayon::current_num_threads(),"logicalCpus":std::thread::available_parallelism().map(|n|n.get()).ok(),
         "indexerThreads":1,"gpuUtilizationPercent":null,
         "gpuUtilizationNote":"Hardware utilization is not sampled; verifier counters measure actual CPU/GPU work."});

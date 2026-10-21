@@ -1,5 +1,6 @@
 [package]
 name = "sfc"
+default-run = "sfc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +9,7 @@ description = "SuperFroniterChain: a modular Rust L1 framework"
 [dependencies]
 anyhow = "1"
 axum = "0.8"
-capnp = "0.20"
+capnp = { version = "0.20", features = ["unaligned"] }
 capnp-rpc = "0.20"
 clap = { version = "4", features = ["derive"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
@@ -34,14 +35,19 @@ sha3 = "0.10"
 secp256k1 = { version = "0.29", features = ["recovery", "global-context"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
+libc = "0.2"
+tempfile = "3"
 
 [build-dependencies]
 capnpc = "0.20"
-
-[dev-dependencies]
-libc = "0.2"
-tempfile = "3"
+num-bigint = "0.5.1"
+num-traits = "0.2.19"
 
 [[bench]]
 name = "execution"
 harness = false
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = "0.33.0"
+mlx-sys = { version = "=0.6.0", features = ["metal", "accelerate"] }

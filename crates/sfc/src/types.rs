@@ -34,9 +34,7 @@ pub struct World {
 }
 impl World {
     pub fn root(&self) -> Hash {
-        let mut bytes = b"sfc/state/v1".to_vec();
-        bytes.extend(serde_json::to_vec(self).expect("serializable state"));
-        hash(&bytes)
+        crate::binary::world_hash(self)
     }
 }
 
@@ -57,25 +55,19 @@ pub struct Receipt {
     pub contract_address: Option<String>,
     pub logs: Vec<Log>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Block {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockDraft {
     pub chain_id: u64,
     pub height: u64,
     pub timestamp: u64,
     pub parent_hash: Hash,
     pub state_root: Hash,
-    pub transactions: Vec<String>,
+    pub transactions: Vec<bytes::Bytes>,
     pub receipts: Vec<Receipt>,
 }
-impl Block {
-    pub fn hash(&self) -> Hash {
-        let mut bytes = b"sfc/block/v1".to_vec();
-        bytes.extend(serde_json::to_vec(self).expect("serializable block"));
-        hash(&bytes)
-    }
-}
+pub use crate::binary::Block;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Genesis {
     pub chain_id: u64,

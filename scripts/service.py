@@ -2,7 +2,7 @@
 """Owned local background node; control socket avoids signaling stale PID files."""
 import argparse
 import fcntl
-import json
+import sfc_codec as codec
 import os
 import pathlib
 import signal
@@ -17,8 +17,8 @@ def request(path, command):
     with socket.socket(socket.AF_UNIX) as client:
         client.settimeout(15)
         client.connect(str(path))
-        client.sendall(command.encode())
-        return client.recv(4096).decode()
+        codec.send_socket(client, command)
+        return codec.receive_socket(client)
 
 
 def daemon(args):
@@ -35,13 +35,13 @@ def daemon(args):
     child = None
     try:
         control.unlink(missing_ok=True)
-        with socket.socket(socket.AF_UNIX) as server, (home / 'node.jsonl').open('ab', buffering=0) as log:
+        with socket.socket(socket.AF_UNIX) as server, (home / 'node.log').open('ab', buffering=0) as log:
             server.bind(str(control))
             os.chmod(control, 0o600)
             server.listen(4)
             server.settimeout(0.2)
             child = subprocess.Popen([args.binary, 'run', '--config', args.config], stdout=log, stderr=log)
-            config = json.loads(pathlib.Path(args.config).read_text())
+            config = codec.loads(pathlib.Path(args.config).read_bytes())
             url = 'http://' + config['rpc_listen'] + '/dashboard/stats'
             while not stopping and child.poll() is None:
                 try:
@@ -51,10 +51,10 @@ def daemon(args):
                 with conn:
                     conn.settimeout(1)
                     try:
-                        command = conn.recv(32).decode()
+                        command = codec.receive_socket(conn)
                         if command == 'stop':
                             stopping = True
-                            conn.sendall(b'stopping')
+                            codec.send_socket(conn, 'stopping')
                         else:
                             # Ensure startup has opened and validated this node's database.
                             try:
@@ -62,8 +62,8 @@ def daemon(args):
                                     ready = response.status == 200 and child.poll() is None
                             except OSError:
                                 ready = False
-                            conn.sendall(b'running' if ready else b'starting')
-                    except (OSError, UnicodeError):
+                            codec.send_socket(conn, 'running' if ready else 'starting')
+                    except (OSError, ValueError, EOFError):
                         pass
     finally:
         if child is not None and child.poll() is None:
@@ -80,8 +80,8 @@ def daemon(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['start', 'stop', '_daemon'])
-    parser.add_argument('--home', default='.sfc')
-    parser.add_argument('--config', default='.sfc/config.json')
+    parser.add_argument('--home', default='.sfc-v3')
+    parser.add_argument('--config', default='.sfc-v3/config.capnp')
     parser.add_argument('--binary', default='target/release/sfc')
     parser.add_argument('--lock-fd', type=int)
     args = parser.parse_args()
@@ -116,13 +116,13 @@ def main():
                     return
                 except BlockingIOError:
                     time.sleep(0.1)
-            raise RuntimeError('shutdown timed out; inspect node.jsonl')
+            raise RuntimeError('shutdown timed out; inspect node.log')
         if active:
             print('SFC service already active.')
             return
         config = pathlib.Path(args.config)
         if not config.exists():
-            if config != home / 'config.json':
+            if config != home / 'config.capnp':
                 raise RuntimeError('custom CONFIG does not exist')
             subprocess.run([args.binary, 'init', '--home', args.home], check=True, stdout=subprocess.DEVNULL)
         with (home / 'service.log').open('ab') as log:
@@ -132,14 +132,14 @@ def main():
         while time.monotonic() < deadline and manager.poll() is None:
             try:
                 if request(control, 'status') == 'running':
-                    print(f'SFC started. Logs: {home / "node.jsonl"}')
+                    print(f'SFC started. Logs: {home / "node.log"}')
                     return
             except OSError:
                 pass
             time.sleep(0.1)
         manager.terminate()
         manager.wait(timeout=12)
-        raise RuntimeError(f'node startup failed; inspect {home / "node.jsonl"}')
+        raise RuntimeError(f'node startup failed; inspect {home / "node.log"}')
 
 
 if __name__ == '__main__':

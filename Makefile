@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 CARGO ?= cargo
-DATA_DIR ?= .sfc
-CONFIG ?= $(DATA_DIR)/config.json
+DATA_DIR ?= .sfc-v3
+CONFIG ?= $(DATA_DIR)/config.capnp
 
 .PHONY: help doctor fetch build release schema fmt lint test test-journal check init run dev archive peer-status smoke erc20 integration bench clean
 help:
@@ -15,15 +15,16 @@ help:
 	@echo '  make integration  Run network, ERC-20, supervisor and pruning tests'
 	@echo '  make test-two-nodes  Test two Python-supervised nodes with signed transactions and crashes'
 	@echo '  make test-emergencies  Inject crashes, freezes, partitions and recovery failures into two nodes'
-	@echo '  make benchmark    Measure local transaction processing throughput (alias: bench)'
-	@echo '  make bench-network  Measure HTTP admission through two-node durable HTTP/3 replay'
+	@echo '  make benchmark    Rust-only release TPS/CPU benchmark; SQLite ON/OFF'
+	@echo '  make bench-network  Measure binary admission through two-node durable replay'
+	@echo '  make bench-transports  Compare TCP and HTTP/3 with alternating trial order'
 	@echo '  make stresstest   Continuous persistent release/GPU test; stop with make stop'
-	@echo '  make bench-mlx    Validate and benchmark experimental Apple GPU ECDSA recovery'
+	@echo '  make bench-backends  Compare CPU, native MLX GPU, HYBRID using Rust'
 	@echo '  make test-mlx     Run GPU arithmetic/recovery differential checks only'
 	@echo '  Other: doctor fetch build release schema fmt lint test init archive dev run-log'
 	@echo '         peer-status smoke erc20 test-journal test-rpc test-http3 test-sync'
 	@echo '         test-pruning test-supervisor smoke-tcp all clean'
-	@echo '  Options: DATA_DIR=.sfc CONFIG=.sfc/config.json NODES=4 CARGO=cargo'
+	@echo '  Options: DATA_DIR=.sfc-v3 CONFIG=.sfc-v3/config.capnp NODES=4 CARGO=cargo'
 	@echo '  Dashboard: http://127.0.0.1:8545/dashboard (default RPC port)'
 doctor:
 	@command -v cargo
@@ -54,7 +55,7 @@ run: release
 	$(CARGO) run --locked --release -p sfc -- run --config '$(CONFIG)'
 archive: build
 	$(CARGO) run --locked -p sfc -- init --home '$(DATA_DIR)' --archive
-smoke: build
+smoke: build codec-setup
 	python3 scripts/smoke.py
 bench:
 	$(CARGO) bench --locked -p sfc --bench execution
@@ -84,17 +85,17 @@ test-journal:
 
 PYTHON ?= python3
 NODES ?= 4
-TESTNET_DIR ?= .sfc-testnet
+TESTNET_DIR ?= .sfc-testnet-v3
 RPC_PORT ?= 8545
 PEER_PORT ?= 26656
 .PHONY: testnet test-supervisor
-testnet: build
+testnet: build codec-setup
 	$(PYTHON) scripts/supervisor.py --home '$(TESTNET_DIR)' --nodes '$(NODES)' --rpc-port '$(RPC_PORT)' --peer-port '$(PEER_PORT)'
-test-supervisor: build test-deps
+test-supervisor: build test-deps codec-setup
 	$(PYTHON) scripts/test_supervisor.py
-test-two-nodes: build test-deps
+test-two-nodes: build test-deps codec-setup
 	$(PYTHON) scripts/test_supervisor.py --nodes 2
-test-emergencies: build test-deps
+test-emergencies: build test-deps codec-setup
 	$(PYTHON) scripts/test_emergencies.py
 integration: test-emergencies
 
@@ -112,10 +113,10 @@ smoke-tcp: build
 	$(PYTHON) scripts/smoke.py --transport tcp
 integration: smoke-tcp
 
-TRANSPORT ?= http3
+TRANSPORT ?= tcp
 
 .PHONY: test-pruning
-test-pruning: build
+test-pruning: build codec-setup
 	$(CARGO) test --locked -p sfc --test pruning
 	$(PYTHON) scripts/test_pruning.py
 integration: test-pruning
@@ -131,70 +132,125 @@ test-sync: test-http3 test-supervisor test-pruning
 .PHONY: run-log
 run-log: release
 	@mkdir -p '$(DATA_DIR)'
-	./target/release/sfc run --config '$(CONFIG)' 2>> '$(DATA_DIR)/node.jsonl'
+	./target/release/sfc run --config '$(CONFIG)' 2>> '$(DATA_DIR)/node.log'
 
 .PHONY: start stop
-start: release
+start: release codec-setup
 	$(PYTHON) scripts/service.py start --home '$(DATA_DIR)' --config '$(CONFIG)'
-stop:
-	$(PYTHON) scripts/stresstest.py stop --home '$(STRESS_DIR)'
-	$(PYTHON) scripts/service.py stop --home '$(DATA_DIR)' --config '$(CONFIG)'
+stop: target/release/sfc-bench
+	./target/release/sfc-bench stop --home '$(STRESS_DIR)' --service-home '$(DATA_DIR)'
+target/release/sfc-bench:
+	$(CARGO) build --locked --release -p sfc --bin sfc-bench
 
 .PHONY: test-service
-test-service: release
+test-service: release codec-setup
 	$(PYTHON) scripts/test_service.py
 
 .PHONY: benchmark
-benchmark: bench
+BENCH_TRANSACTIONS ?= 262144
+BENCH_REPEAT ?= 3
+BENCH_SQLITE ?= both
+BENCH_BACKEND ?= gpu
+BENCH_TRANSPORT ?= tcp
+BENCH_INFLIGHT ?= 1
+SYNC_TRANSPORT ?= $(BENCH_TRANSPORT)
+GPU_RUNTIME ?= mlx-native
+benchmark: release
+	RAYON_NUM_THREADS='$(STRESS_THREADS)' ./target/release/sfc-bench bench --transactions '$(BENCH_TRANSACTIONS)' \
+		--repeat '$(BENCH_REPEAT)' --sqlite '$(BENCH_SQLITE)' --backend '$(BENCH_BACKEND)' --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)'
 
 .PHONY: dashboard
 dashboard: test-deps
 	npm run build:dashboard
 
 .PHONY: bench-network
-bench-network: release test-deps
-	$(PYTHON) scripts/benchmark_network.py
+bench-network: release
+	RAYON_NUM_THREADS='$(STRESS_THREADS)' ./target/release/sfc-bench bench --nodes 2 --transactions '$(BENCH_TRANSACTIONS)' \
+		--repeat '$(BENCH_REPEAT)' --sqlite '$(BENCH_SQLITE)' --backend '$(BENCH_BACKEND)' --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)' --sync-transport '$(SYNC_TRANSPORT)'
 
-STRESS_TRANSACTIONS ?= 65536
+STRESS_TRANSACTIONS ?= 1048576
 STRESS_BATCH ?= 4096
-STRESS_INTERVAL ?= 100
-STRESS_DIR ?= .sfc-stress
-STRESS_REPORT ?= $(STRESS_DIR)/results.jsonl
+STRESS_INTERVAL ?= 10
+STRESS_THREADS ?= 12
+STRESS_SQLITE ?= on
+STRESS_DIR ?= .sfc-stress-v3
+STRESS_REPORT ?= $(STRESS_DIR)/results.capnp
 .PHONY: stresstest
-stresstest: release test-deps mlx-setup
-	$(PYTHON) scripts/stresstest.py run --binary '$(CURDIR)/target/release/sfc' \
-		--home '$(STRESS_DIR)' --transactions '$(STRESS_TRANSACTIONS)' \
+stresstest: release
+	RAYON_NUM_THREADS='$(STRESS_THREADS)' ./target/release/sfc-bench run --binary '$(CURDIR)/target/release/sfc' \
+		--nodes 1 --backend gpu --home '$(STRESS_DIR)' --transactions '$(STRESS_TRANSACTIONS)' \
 		--rpc-batch '$(STRESS_BATCH)' --interval '$(STRESS_INTERVAL)' \
-		--output '$(STRESS_REPORT)'
+		--output '$(STRESS_REPORT)' --sqlite '$(STRESS_SQLITE)' --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)'
 
 .PHONY: test-stresstest
-test-stresstest: release test-deps mlx-setup
-	$(PYTHON) scripts/test_stresstest.py
+test-stresstest: release
+	$(CARGO) test --locked --release --test native_benchmark -- --ignored --test-threads=1
 
-# Apple MLX setup is required for the default GPU transaction verifier.
-MLX_PYTHON ?= python3.13
+.PHONY: test-benchmark-metrics test-migrations
+test-benchmark-metrics:
+	$(CARGO) test --locked --release --bin sfc-bench
+test-migrations:
+	$(CARGO) test --locked -p sfc --lib schema::tests
+	$(CARGO) test --locked -p sfc --test migrations
+integration: test-benchmark-metrics
+
+.PHONY: test-fixture
+test-fixture: test-deps
+	node scripts/test_fixture.mjs
+integration: test-fixture
+
+# MLX is built and tested through Rust. No Python MLX environment is installed.
 .PHONY: mlx-setup mlx-oracle test-mlx bench-mlx bench-mlx-cpu bench-mlx-optimized
-mlx-setup:
-	UV_CACHE_DIR='$(CURDIR)/target/uv-cache' uv venv --allow-existing --python '$(MLX_PYTHON)' target/mlx-venv
-	UV_CACHE_DIR='$(CURDIR)/target/uv-cache' uv pip install --python target/mlx-venv/bin/python -r experiments/mlx_ecdsa/requirements.txt
+mlx-setup: release
 mlx-oracle:
 	$(CARGO) build --locked --release --example ecdsa_oracle
-test-mlx: mlx-setup mlx-oracle
-	target/mlx-venv/bin/python experiments/mlx_ecdsa/benchmark.py --tests-only --output target/mlx-ecdsa/validation.json
-bench-mlx: mlx-setup mlx-oracle
-	target/mlx-venv/bin/python experiments/mlx_ecdsa/benchmark.py
-bench-mlx-cpu: mlx-setup mlx-oracle
-	target/mlx-venv/bin/python experiments/mlx_ecdsa/cpu_usage.py
-bench-mlx-optimized: mlx-setup mlx-oracle
-	target/mlx-venv/bin/python experiments/mlx_ecdsa/benchmark_optimized.py
+test-mlx: release
+	$(CARGO) test --locked --release --lib mlx_native_differential -- --ignored
+bench-mlx bench-mlx-optimized bench-mlx-latency: benchmark
+bench-mlx-cpu: bench-backends
 
 .PHONY: test-verification bench-backends
-test-verification: release test-deps mlx-setup
-	$(CARGO) test --locked --test verification -- --include-ignored
-	$(PYTHON) scripts/test_verification_network.py
-bench-backends: release test-deps mlx-setup
-	$(PYTHON) scripts/benchmark_network.py --backend all --rpc-batch 4096 --transactions 65536
+test-verification: release
+	$(CARGO) test --locked --release --test verification -- --include-ignored
+	$(CARGO) test --locked --release --lib native_recovery -- --ignored
+	$(CARGO) test --locked --release --lib mlx_native_differential -- --ignored
+bench-backends: release
+	@for backend in cpu gpu hybrid; do \
+		RAYON_NUM_THREADS='$(STRESS_THREADS)' ./target/release/sfc-bench bench \
+			--backend "$$backend" --transactions '$(BENCH_TRANSACTIONS)' \
+			--repeat '$(BENCH_REPEAT)' --sqlite '$(BENCH_SQLITE)' --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)' || exit $$?; \
+	done
 
-.PHONY: bench-mlx-latency
-bench-mlx-latency: mlx-setup mlx-oracle
-	target/mlx-venv/bin/python experiments/mlx_ecdsa/benchmark_latency.py
+# Python is confined to supervisor configuration/control and process lifecycle.
+SUPERVISOR_PYTHON ?= python3.13
+.PHONY: codec-setup
+codec-setup:
+	UV_CACHE_DIR='$(CURDIR)/target/uv-cache' uv venv --allow-existing --python '$(SUPERVISOR_PYTHON)' target/supervisor-venv
+	UV_CACHE_DIR='$(CURDIR)/target/uv-cache' uv pip install --offline --python target/supervisor-venv/bin/python pycapnp==2.2.4 || \
+	UV_CACHE_DIR='$(CURDIR)/target/uv-cache' uv pip install --python target/supervisor-venv/bin/python pycapnp==2.2.4
+
+.PHONY: test-codec
+test-codec: test-deps
+	$(CARGO) test --locked --release --test codec
+	$(CARGO) build --locked --release --example codec_roundtrip --bin sfc
+	node scripts/test_codec.mjs
+integration: test-codec
+
+.PHONY: test-indexer-toggle
+test-indexer-toggle: release
+	$(CARGO) test --locked --release --test native_benchmark rust_stress_stop_restart_lock_and_sqlite_toggle -- --ignored --test-threads=1
+
+# Alternate transport order to reduce systematic thermal/order bias. Reports append.
+BENCH_NODES ?= 1
+TRANSPORT_REPORT ?= target/transport-benchmark.capnp
+.PHONY: bench-transports
+bench-transports: release
+	@i=1; while [ $$i -le '$(BENCH_REPEAT)' ]; do \
+		if [ $$((i % 2)) -eq 1 ]; then order='tcp http3'; else order='http3 tcp'; fi; \
+		for transport in $$order; do \
+			RAYON_NUM_THREADS='$(STRESS_THREADS)' ./target/release/sfc-bench bench \
+				--nodes '$(BENCH_NODES)' --transactions '$(BENCH_TRANSACTIONS)' --repeat 1 \
+				--sqlite '$(BENCH_SQLITE)' --backend '$(BENCH_BACKEND)' --gpu-runtime '$(GPU_RUNTIME)' \
+				--transport $transport --sync-transport $transport --inflight '$(BENCH_INFLIGHT)' --output '$(TRANSPORT_REPORT)' || exit $$?; \
+		done; i=$$((i + 1)); \
+	done

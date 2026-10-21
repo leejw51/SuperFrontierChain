@@ -2,6 +2,11 @@
 pub mod chain_capnp {
     include!(concat!(env!("OUT_DIR"), "/chain_capnp.rs"));
 }
+#[allow(unused_parens, clippy::all)]
+pub mod runtime_capnp {
+    include!(concat!(env!("OUT_DIR"), "/runtime_capnp.rs"));
+}
+pub mod codec;
 pub mod config;
 pub mod consensus;
 pub mod ethereum;
@@ -23,3 +28,10 @@ pub mod logging;
 pub mod telemetry;
 
 pub mod evm_db;
+
+pub mod storage_capnp {
+    include!(concat!(env!("OUT_DIR"), "/storage_capnp.rs"));
+}
+pub mod binary;
+
+mod records;

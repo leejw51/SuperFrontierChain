@@ -40,22 +40,42 @@ fn journal_crash_worker() {
         )
         .unwrap();
     store.commit(&block, &world).unwrap();
-    // Deliberately do not maintain JSONL or close either database.
+    if std::env::var_os("SFC_JOURNAL_MAINTAIN").is_some() {
+        store.maintain().unwrap();
+    }
+    // Deliberately leave both databases open for the parent's SIGKILL.
     let mut signer =
         DurableSigner::open(&home.join("signer"), 7777, SigningKey::from_bytes(&[7; 32])).unwrap();
     let vote = signer
         .sign(1, 0, Phase::Precommit, Some(block.hash()))
         .unwrap();
-    let expected = serde_json::to_vec(&(block, world, vote)).unwrap();
+    let mut expected = Vec::new();
+    for bytes in [
+        block.as_bytes().to_vec(),
+        sfc::codec::to_vec(&world).unwrap(),
+        sfc::codec::to_vec(&vote).unwrap(),
+    ] {
+        sfc::codec::write_record(&mut expected, &bytes).unwrap();
+    }
     fs::write(home.join("ready.tmp"), expected).unwrap();
-    fs::rename(home.join("ready.tmp"), home.join("ready.json")).unwrap();
+    fs::rename(home.join("ready.tmp"), home.join("ready.capnp")).unwrap();
     loop {
         std::thread::park_timeout(Duration::from_secs(60));
     }
 }
 
 fn crash_after_acknowledged_writes(home: &Path) -> (Block, World, Vote) {
-    let child = Command::new(std::env::current_exe().unwrap())
+    crash_after_writes(home, false)
+}
+
+fn crash_after_writes(home: &Path, maintain: bool) -> (Block, World, Vote) {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    if maintain {
+        command.env("SFC_JOURNAL_MAINTAIN", "1");
+    } else {
+        command.env_remove("SFC_JOURNAL_MAINTAIN");
+    }
+    let child = command
         .args([
             "--exact",
             "journal_crash_worker",
@@ -68,7 +88,7 @@ fn crash_after_acknowledged_writes(home: &Path) -> (Block, World, Vote) {
         .unwrap();
     let mut child = KillOnDrop(child);
     let deadline = Instant::now() + Duration::from_secs(15);
-    while !home.join("ready.json").exists() {
+    while !home.join("ready.capnp").exists() {
         assert!(
             child.0.try_wait().unwrap().is_none(),
             "writer exited before acknowledging writes"
@@ -87,7 +107,43 @@ fn crash_after_acknowledged_writes(home: &Path) -> (Block, World, Vote) {
             .is_some_and(|e| e == "sst")));
         assert!(!wal_files(&db).is_empty());
     }
-    serde_json::from_slice(&fs::read(home.join("ready.json")).unwrap()).unwrap()
+    let bytes = fs::read(home.join("ready.capnp")).unwrap();
+    let mut input = bytes.as_slice();
+    (
+        sfc::codec::from_slice(&sfc::codec::read_record(&mut input).unwrap().unwrap()).unwrap(),
+        sfc::codec::from_slice(&sfc::codec::read_record(&mut input).unwrap().unwrap()).unwrap(),
+        sfc::codec::from_slice(&sfc::codec::read_record(&mut input).unwrap().unwrap()).unwrap(),
+    )
+}
+
+#[test]
+fn batched_history_recovers_missing_or_torn_tail_after_kill() {
+    for torn in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        let (block, world, _) = crash_after_writes(home.path(), true);
+        let segment = home.path().join(format!(
+            "chain/history/{:020}.capnp",
+            block.timestamp() / 3600
+        ));
+        let file = fs::OpenOptions::new().write(true).open(&segment).unwrap();
+        let retained = if torn {
+            file.metadata().unwrap().len() - 5
+        } else {
+            0
+        };
+        // Model a power failure losing some or all of the unsynced projection.
+        file.set_len(retained).unwrap();
+        drop(file);
+        let store =
+            Store::open(&home.path().join("chain"), Retention::default(), &genesis()).unwrap();
+        assert_eq!(store.head().unwrap(), block);
+        assert_eq!(store.world().unwrap(), world);
+        let recovered: Vec<Block> =
+            sfc::codec::read_all(&mut fs::File::open(&segment).unwrap()).unwrap();
+        assert_eq!(recovered.len(), 2);
+        assert_eq!(recovered[1], block);
+        assert_eq!(store.receipt_block(&transfer(0).hash).unwrap(), Some(block));
+    }
 }
 
 fn wal_files(path: &Path) -> Vec<PathBuf> {
@@ -103,10 +159,15 @@ fn acknowledged_state_and_signing_guard_recover_after_process_kill() {
     let home = tempfile::tempdir().unwrap();
     let (block, world, vote) = crash_after_acknowledged_writes(home.path());
     let segment = home.path().join(format!(
-        "chain/history/{:020}.jsonl",
-        block.timestamp / 3600
+        "chain/history/{:020}.capnp",
+        block.timestamp() / 3600
     ));
-    assert_eq!(fs::read_to_string(&segment).unwrap().lines().count(), 1);
+    assert_eq!(
+        sfc::codec::read_all::<Block>(&mut fs::File::open(&segment).unwrap())
+            .unwrap()
+            .len(),
+        1
+    );
     let store = Store::open(&home.path().join("chain"), Retention::default(), &genesis()).unwrap();
     assert_eq!(store.head().unwrap(), block);
     assert_eq!(store.world().unwrap(), world);
@@ -114,11 +175,8 @@ fn acknowledged_state_and_signing_guard_recover_after_process_kill() {
         store.receipt_block(&transfer(0).hash).unwrap(),
         Some(block.clone())
     );
-    let recovered: Vec<Block> = fs::read_to_string(&segment)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let recovered: Vec<Block> =
+        sfc::codec::read_all(&mut fs::File::open(&segment).unwrap()).unwrap();
     assert_eq!(recovered.len(), 2);
     assert_eq!(recovered[1], block);
     let mut signer = DurableSigner::open(

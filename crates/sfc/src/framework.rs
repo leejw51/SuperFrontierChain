@@ -1,7 +1,7 @@
 //! A deterministic, small application lifecycle. Module order is registration order.
 use crate::{
     ethereum::{self, Context, Transaction},
-    types::{Block, World, MAX_BLOCK_BYTES},
+    types::{Block, BlockDraft, World, MAX_BLOCK_BYTES},
 };
 use anyhow::{ensure, Result};
 use std::collections::VecDeque;
@@ -84,11 +84,11 @@ impl Application {
         transactions: impl Iterator<Item = &'a Transaction>,
         selection: Option<usize>,
     ) -> Result<PreparedBlock> {
-        ensure!(timestamp >= parent.timestamp, "timestamp moved backwards");
+        ensure!(timestamp >= parent.timestamp(), "timestamp moved backwards");
         let context = Context {
-            chain_id: parent.chain_id,
+            chain_id: parent.chain_id(),
             height: parent
-                .height
+                .height()
                 .checked_add(1)
                 .ok_or_else(|| anyhow::anyhow!("height overflow"))?,
             timestamp,
@@ -96,7 +96,7 @@ impl Application {
         };
         let parent_hash = parent.hash();
         let mut next = world.clone();
-        next.block_hashes.insert(parent.height, parent_hash);
+        next.block_hashes.insert(parent.height(), parent_hash);
         next.block_hashes
             .retain(|height, _| *height >= context.height.saturating_sub(256));
         for module in &self.modules {
@@ -137,22 +137,22 @@ impl Application {
             gas_used += result.gas_used();
             bytes += tx.raw.len();
             receipts.push(ethereum::receipt(tx, &result, gas_used));
-            accepted.push(format!("0x{}", hex::encode(&tx.raw)));
+            accepted.push(tx.raw.clone());
         }
         drop(executor);
         ethereum::save_db(&db, &mut next)?;
         for module in &self.modules {
             module.end_block(context, &mut next)?;
         }
-        let block = Block {
-            chain_id: parent.chain_id,
+        let block = Block::build(BlockDraft {
+            chain_id: parent.chain_id(),
             height: context.height,
             timestamp,
             parent_hash,
             state_root: next.root(),
             transactions: accepted,
             receipts,
-        };
+        })?;
         Ok(PreparedBlock {
             block,
             world: next,

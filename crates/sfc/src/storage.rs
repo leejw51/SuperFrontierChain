@@ -1,18 +1,19 @@
 use crate::{
     config::Retention,
-    types::{Block, Genesis, World},
+    types::{Block, BlockDraft, Genesis, World},
 };
 use anyhow::{bail, ensure, Context, Result};
+use bytes::Bytes;
 use rocksdb::{WriteBatch, DB};
-use sha3::{Digest, Keccak256};
 use std::{
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        RwLock,
+        Mutex, RwLock,
     },
+    time::{Duration, Instant},
 };
 
 pub struct Store {
@@ -22,22 +23,61 @@ pub struct Store {
     projected_height: AtomicU64,
     cleaned_hour: AtomicU64,
     head: RwLock<Option<CachedHead>>,
+    history_writer: Mutex<Option<HistoryWriter>>,
+}
+// History is a rebuildable projection, not the commit journal. Keep appends
+// visible immediately, but amortize fsync while RocksDB still syncs every commit.
+const HISTORY_SYNC_INTERVAL: Duration = Duration::from_millis(100);
+const HISTORY_SYNC_BYTES: usize = 8 * 1024 * 1024;
+struct HistoryWriter {
+    file: File,
+    hour: u64,
+    length: u64,
+    dirty_bytes: usize,
+    last_sync: Instant,
+    needs_rollback: bool,
+}
+impl HistoryWriter {
+    fn sync(&mut self) -> Result<()> {
+        if self.dirty_bytes > 0 {
+            self.file.sync_all()?;
+            self.dirty_bytes = 0;
+        }
+        self.last_sync = Instant::now();
+        Ok(())
+    }
+    fn append(&mut self, bytes: &[u8]) -> Result<()> {
+        // Roll back a partial frame before any retry, including after an I/O error.
+        if self.needs_rollback {
+            self.file.set_len(self.length)?;
+        }
+        self.needs_rollback = true;
+        crate::codec::write_record(&mut self.file, bytes)?;
+        self.length += 8 + bytes.len() as u64;
+        self.dirty_bytes += 8 + bytes.len();
+        self.needs_rollback = false;
+        Ok(())
+    }
+}
+impl Drop for HistoryWriter {
+    fn drop(&mut self) {
+        // Failure is recoverable from the authoritative RocksDB WAL on restart.
+        let _ = self.sync();
+    }
 }
 struct CachedHead {
     block: Block,
-    encoded: Vec<u8>,
+    encoded: Bytes,
     hash: crate::types::Hash,
 }
 impl CachedHead {
     fn new(block: Block) -> Result<Self> {
-        let encoded = serde_json::to_vec(&block)?;
-        let mut digest = Keccak256::new();
-        digest.update(b"sfc/block/v1");
-        digest.update(&encoded);
+        let encoded = block.shared_bytes();
+        let hash = block.hash();
         Ok(Self {
             block,
             encoded,
-            hash: digest.finalize().into(),
+            hash,
         })
     }
 }
@@ -50,7 +90,7 @@ const PRUNE_BATCH_BLOCKS: usize = 256;
 const PRUNE_BATCH_BYTES: usize = 8 * 1024 * 1024;
 
 fn expired(block: &Block, head: &Block, seconds: u64) -> bool {
-    block.height != head.height && block.timestamp < head.timestamp.saturating_sub(seconds)
+    block.height() != head.height() && block.timestamp() < head.timestamp().saturating_sub(seconds)
 }
 
 impl Store {
@@ -89,6 +129,10 @@ impl Store {
         let mut options = crate::journal::database_options();
         options.set_compression_type(rocksdb::DBCompressionType::Lz4);
         let db = DB::open(&options, path.join("rocksdb"))?;
+        if db.get(b"genesis")?.is_some() {
+            ensure!(db.get(b"meta/protocol_version")?.as_deref()==Some(&crate::codec::PROTOCOL_VERSION.to_le_bytes()),
+                "legacy or incompatible chain: preserve this directory and initialize a new protocol-v3 home");
+        }
         crate::schema::check_rocksdb(&db)?;
         let store = Self {
             db,
@@ -97,11 +141,12 @@ impl Store {
             projected_height: AtomicU64::new(0),
             cleaned_hour: AtomicU64::new(0),
             head: RwLock::new(None),
+            history_writer: Mutex::new(None),
         };
-        let expected = serde_json::to_vec(genesis)?;
+        let expected = crate::codec::to_vec(genesis)?;
         if let Some(existing) = store.db.get(b"genesis")? {
             ensure!(
-                existing == expected,
+                crate::codec::from_slice::<crate::types::Genesis>(&existing)? == *genesis,
                 "genesis does not match existing database"
             );
             crate::schema::migrate_rocksdb(&store.db)?;
@@ -115,7 +160,7 @@ impl Store {
                 "nonempty chain database has no genesis"
             );
             let world = genesis.world()?;
-            let block = Block {
+            let block = Block::build(BlockDraft {
                 chain_id: genesis.chain_id,
                 height: 0,
                 timestamp: genesis.timestamp,
@@ -123,26 +168,33 @@ impl Store {
                 state_root: world.root(),
                 transactions: vec![],
                 receipts: vec![],
-            };
+            })?;
             let mut batch = WriteBatch::default();
             batch.put(b"genesis", expected);
+            batch.put(
+                b"meta/protocol_version",
+                crate::codec::PROTOCOL_VERSION.to_le_bytes(),
+            );
             let mut metadata = world.clone();
             metadata.accounts.clear();
-            batch.put(b"world", serde_json::to_vec(&metadata)?);
+            batch.put(b"world", crate::binary::world_bytes(&metadata)?);
             for (address, account) in &world.accounts {
-                batch.put(format!("account/{address}"), serde_json::to_vec(account)?);
+                batch.put(
+                    format!("account/{address}"),
+                    crate::binary::account_bytes(account)?,
+                );
             }
-            batch.put(b"head", serde_json::to_vec(&block.height)?);
-            batch.put(block_key(0), serde_json::to_vec(&block)?);
+            batch.put(b"head", crate::codec::to_vec(&block.height())?);
+            batch.put(block_key(0), block.as_bytes());
             batch.put(
                 crate::schema::ROCKSDB_VERSION_KEY,
-                serde_json::to_vec(&crate::schema::ROCKSDB_VERSION)?,
+                crate::codec::to_vec(&crate::schema::ROCKSDB_VERSION)?,
             );
             store.write(batch)?;
         }
         let head = store.head()?;
         ensure!(
-            head.state_root == store.world()?.root(),
+            head.state_root() == store.world()?.root(),
             "database state commitment mismatch"
         );
         *store
@@ -159,7 +211,8 @@ impl Store {
         Ok(())
     }
     pub fn world(&self) -> Result<World> {
-        let mut world: World = self.required(b"world")?;
+        let mut world =
+            crate::binary::world_from_bytes(&self.db.get(b"world")?.context("missing world")?)?;
         for entry in self.db.prefix_iterator(b"account/") {
             let (key, value) = entry?;
             if !key.starts_with(b"account/") {
@@ -167,7 +220,7 @@ impl Store {
             }
             world.accounts.insert(
                 std::str::from_utf8(&key[8..])?.to_owned(),
-                serde_json::from_slice(&value)?,
+                crate::binary::account_from_bytes(&value)?,
             );
         }
         Ok(world)
@@ -193,9 +246,8 @@ impl Store {
             .context("missing cached head")?
             .hash)
     }
-    fn required<T: serde::de::DeserializeOwned>(&self, key: &[u8]) -> Result<T> {
-        serde_json::from_slice(&self.db.get(key)?.context("missing database metadata")?)
-            .map_err(Into::into)
+    fn required<T: crate::codec::Record>(&self, key: &[u8]) -> Result<T> {
+        crate::codec::from_slice(&self.db.get(key)?.context("missing database metadata")?)
     }
     pub fn block(&self, height: u64) -> Result<Option<Block>> {
         if let Some(head) = self
@@ -204,20 +256,20 @@ impl Store {
             .map_err(|_| anyhow::anyhow!("head lock poisoned"))?
             .as_ref()
         {
-            if head.block.height == height {
+            if head.block.height() == height {
                 return Ok(Some(head.block.clone()));
             }
         }
         self.db
             .get(block_key(height))?
-            .map(|bytes| serde_json::from_slice(&bytes).map_err(Into::into))
+            .map(Block::from_bytes)
             .transpose()
     }
     pub fn receipt_block(&self, hash: &[u8]) -> Result<Option<Block>> {
         let Some(bytes) = self.db.get(format!("tx/{}", hex::encode(hash)))? else {
             return Ok(None);
         };
-        let height: u64 = serde_json::from_slice(&bytes)?;
+        let height: u64 = crate::codec::from_slice(&bytes)?;
         self.block(height)
     }
     pub fn blocks(&self) -> Result<Vec<Block>> {
@@ -227,7 +279,7 @@ impl Store {
             if !key.starts_with(b"block/") {
                 break;
             }
-            blocks.push(serde_json::from_slice(&value)?);
+            blocks.push(Block::from_bytes(value.into_vec())?);
         }
         Ok(blocks)
     }
@@ -240,11 +292,11 @@ impl Store {
         }
         bail!("missing chain history")
     }
-    /// Durable state and history are atomic. JSONL is a recoverable projection.
+    /// Durable state and history are atomic. Cap’n Proto is a recoverable projection.
     pub fn commit(&self, block: &Block, world: &World) -> Result<()> {
         self.commit_delta(block, world, &self.world()?)
     }
-    /// Only changed JSON account records enter the atomic RocksDB write batch.
+    /// Only changed Cap’n Proto account records enter the atomic RocksDB write batch.
     pub(crate) fn commit_delta(
         &self,
         block: &Block,
@@ -259,25 +311,33 @@ impl Store {
         let prior = cached.as_ref().context("missing cached head")?;
         let head = &prior.block;
         ensure!(
-            block.height == head.height.checked_add(1).context("height overflow")?,
+            block.height() == head.height().checked_add(1).context("height overflow")?,
             "non-contiguous height"
         );
-        ensure!(block.parent_hash == prior.hash, "parent mismatch");
-        ensure!(block.chain_id == head.chain_id, "chain mismatch");
+        ensure!(block.parent_hash() == prior.hash, "parent mismatch");
+        ensure!(block.chain_id() == head.chain_id(), "chain mismatch");
         ensure!(
-            block.timestamp >= head.timestamp,
+            block.timestamp() >= head.timestamp(),
             "timestamp moved backwards"
         );
-        ensure!(block.state_root == world.root(), "state root mismatch");
+        ensure!(block.state_root() == world.root(), "state root mismatch");
         ensure!(
-            block.transactions.len() == block.receipts.len(),
+            block.transaction_count()
+                == block
+                    .read()?
+                    .get_root::<crate::storage_capnp::block::Reader>()?
+                    .get_receipts()?
+                    .len() as usize,
             "receipt count mismatch"
         );
         let next_head = CachedHead::new(block.clone())?;
         let mut batch = WriteBatch::default();
         for (address, account) in &world.accounts {
             if previous.accounts.get(address) != Some(account) {
-                batch.put(format!("account/{address}"), serde_json::to_vec(account)?);
+                batch.put(
+                    format!("account/{address}"),
+                    crate::binary::account_bytes(account)?,
+                );
             }
         }
         for address in previous.accounts.keys() {
@@ -290,13 +350,18 @@ impl Store {
             module_state: world.module_state.clone(),
             block_hashes: world.block_hashes.clone(),
         };
-        batch.put(b"world", serde_json::to_vec(&metadata)?);
-        batch.put(b"head", serde_json::to_vec(&block.height)?);
-        batch.put(block_key(block.height), &next_head.encoded);
-        for receipt in &block.receipts {
+        batch.put(b"world", crate::binary::world_bytes(&metadata)?);
+        let encoded_height = crate::codec::to_vec(&block.height())?;
+        batch.put(b"head", &encoded_height);
+        batch.put(block_key(block.height()), &next_head.encoded);
+        let message = block.read()?;
+        for receipt in message
+            .get_root::<crate::storage_capnp::block::Reader>()?
+            .get_receipts()?
+        {
             batch.put(
-                format!("tx/{}", hex::encode(receipt.transaction_hash)),
-                serde_json::to_vec(&block.height)?,
+                format!("tx/{}", hex::encode(receipt.get_transaction_hash()?)),
+                &encoded_height,
             );
         }
         self.write(batch)?;
@@ -311,19 +376,45 @@ impl Store {
             .map_err(|_| anyhow::anyhow!("head lock poisoned"))?;
         let head = cached.as_ref().context("missing cached head")?;
         let block = &head.block;
-        if block.height > self.projected_height.load(Ordering::Acquire) {
-            let target = self
-                .history
-                .join(format!("{:020}.jsonl", block.timestamp / 3600));
-            let new_segment = !target.exists();
-            let mut file = OpenOptions::new().create(true).append(true).open(target)?;
-            file.write_all(&head.encoded)?;
-            file.write_all(b"\n")?;
-            file.sync_all()?;
-            if new_segment {
-                File::open(&self.history)?.sync_all()?;
+        let mut writer = self
+            .history_writer
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+        if block.height() > self.projected_height.load(Ordering::Acquire) {
+            let hour = block.timestamp() / 3600;
+            if writer.as_ref().is_none_or(|w| w.hour != hour) {
+                if let Some(previous) = writer.as_mut() {
+                    previous.sync()?;
+                }
+                let target = self.history.join(format!("{hour:020}.capnp"));
+                let new_segment = !target.exists();
+                let file = OpenOptions::new().create(true).append(true).open(target)?;
+                if new_segment {
+                    file.sync_all()?;
+                    File::open(&self.history)?.sync_all()?;
+                }
+                *writer = Some(HistoryWriter {
+                    length: file.metadata()?.len(),
+                    file,
+                    hour,
+                    dirty_bytes: 0,
+                    last_sync: Instant::now(),
+                    needs_rollback: false,
+                });
             }
-            self.projected_height.store(block.height, Ordering::Release);
+            writer
+                .as_mut()
+                .context("missing history writer")?
+                .append(&head.encoded)?;
+            self.projected_height
+                .store(block.height(), Ordering::Release);
+        }
+        if let Some(writer) = writer.as_mut() {
+            if writer.dirty_bytes >= HISTORY_SYNC_BYTES
+                || writer.last_sync.elapsed() >= HISTORY_SYNC_INTERVAL
+            {
+                writer.sync()?;
+            }
         }
         self.prune_at(block)?;
         Ok(())
@@ -339,7 +430,7 @@ impl Store {
         let Retention::Pruned { seconds } = self.retention else {
             return Ok(());
         };
-        let cutoff = head.timestamp.saturating_sub(seconds);
+        let cutoff = head.timestamp().saturating_sub(seconds);
         let mut batch = WriteBatch::default();
         let mut pending = 0;
         for entry in self.db.prefix_iterator(b"block/") {
@@ -347,12 +438,19 @@ impl Store {
             if !key.starts_with(b"block/") {
                 break;
             }
-            let block: Block = serde_json::from_slice(&value)?;
+            let block = Block::from_bytes(value.into_vec())?;
             if !expired(&block, head, seconds) {
                 break;
             }
-            for receipt in &block.receipts {
-                batch.delete(format!("tx/{}", hex::encode(receipt.transaction_hash)));
+            let message = block.read()?;
+            for receipt in message
+                .get_root::<crate::storage_capnp::block::Reader>()?
+                .get_receipts()?
+            {
+                batch.delete(format!(
+                    "tx/{}",
+                    hex::encode(receipt.get_transaction_hash()?)
+                ));
             }
             batch.delete(key);
             pending += 1;
@@ -371,7 +469,7 @@ impl Store {
         if self.cleaned_hour.load(Ordering::Acquire) != cutoff_hour {
             for entry in fs::read_dir(&self.history)? {
                 let path = entry?.path();
-                if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                if path.extension().and_then(|s| s.to_str()) != Some("capnp") {
                     continue;
                 }
                 if let Some(hour) = path
@@ -379,7 +477,7 @@ impl Store {
                     .and_then(|s| s.to_str())
                     .and_then(|s| s.parse::<u64>().ok())
                 {
-                    if hour < cutoff_hour && hour != head.timestamp / 3600 {
+                    if hour < cutoff_hour && hour != head.timestamp() / 3600 {
                         fs::remove_file(path)?;
                     }
                 }
@@ -390,16 +488,15 @@ impl Store {
         Ok(())
     }
     fn repair_history(&self) -> Result<()> {
-        // Rebuild the JSONL projection from authoritative records only on restart.
+        // Rebuild the Cap’n Proto projection from authoritative records only on restart.
         // Hourly segments avoid millions of tiny files at a 500ms block cadence.
         let mut segments = std::collections::BTreeMap::<u64, Vec<u8>>::new();
         for block in self.blocks()? {
-            let bytes = segments.entry(block.timestamp / 3600).or_default();
-            serde_json::to_writer(&mut *bytes, &block)?;
-            bytes.push(b'\n');
+            let bytes = segments.entry(block.timestamp() / 3600).or_default();
+            crate::codec::write_record(bytes, block.as_bytes())?;
         }
         for (hour, bytes) in &segments {
-            let target = self.history.join(format!("{hour:020}.jsonl"));
+            let target = self.history.join(format!("{hour:020}.capnp"));
             if fs::read(&target).ok().as_deref() == Some(bytes.as_slice()) {
                 continue;
             }
@@ -415,7 +512,7 @@ impl Store {
                 fs::remove_file(path)?;
                 continue;
             }
-            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+            if path.extension().and_then(|s| s.to_str()) != Some("capnp") {
                 continue;
             }
             if let Some(hour) = path
@@ -430,7 +527,7 @@ impl Store {
         }
         File::open(&self.history)?.sync_all()?;
         self.projected_height
-            .store(self.head()?.height, Ordering::Release);
+            .store(self.head()?.height(), Ordering::Release);
         Ok(())
     }
 }
@@ -439,8 +536,44 @@ impl Store {
 mod tests {
     use super::*;
     #[test]
+    fn history_retry_removes_partial_frame_without_rewriting_valid_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.capnp");
+        let mut writer = HistoryWriter {
+            file: OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .unwrap(),
+            hour: 0,
+            length: 0,
+            dirty_bytes: 0,
+            last_sync: Instant::now(),
+            needs_rollback: false,
+        };
+        writer.append(b"first").unwrap();
+        // Simulate write_record failing after publishing a length and partial data.
+        writer.file.write_all(&99u64.to_le_bytes()).unwrap();
+        writer.file.write_all(b"torn").unwrap();
+        writer.needs_rollback = true;
+        writer.append(b"second").unwrap();
+        writer.sync().unwrap();
+        assert_eq!(writer.dirty_bytes, 0);
+        let mut file = File::open(path).unwrap();
+        assert_eq!(
+            crate::codec::read_record(&mut file).unwrap().unwrap(),
+            b"first"
+        );
+        assert_eq!(
+            crate::codec::read_record(&mut file).unwrap().unwrap(),
+            b"second"
+        );
+        assert!(crate::codec::read_record(&mut file).unwrap().is_none());
+    }
+
+    #[test]
     fn cutoff_is_exclusive_and_head_is_never_pruned() {
-        let head = Block {
+        let draft = crate::types::BlockDraft {
             chain_id: 1,
             height: 10,
             timestamp: 100,
@@ -449,13 +582,14 @@ mod tests {
             transactions: vec![],
             receipts: vec![],
         };
-        let mut old = head.clone();
+        let head = Block::build(draft.clone()).unwrap();
+        let mut old = draft;
         old.height = 9;
         old.timestamp = 89;
-        assert!(expired(&old, &head, 10));
+        assert!(expired(&Block::build(old.clone()).unwrap(), &head, 10));
         old.timestamp = 90;
-        assert!(!expired(&old, &head, 10));
+        assert!(!expired(&Block::build(old.clone()).unwrap(), &head, 10));
         assert!(!expired(&head, &head, 10));
-        assert!(!expired(&old, &head, 200));
+        assert!(!expired(&Block::build(old.clone()).unwrap(), &head, 200));
     }
 }

@@ -57,35 +57,40 @@ impl DurableSigner {
             "signer schema {version} is newer than supported {}; use a newer binary",
             crate::schema::SIGNER_VERSION
         );
-        let identity = serde_json::to_vec(&(chain_id, key.verifying_key().to_bytes()))?;
+        let identity = crate::codec::to_vec(&(chain_id, key.verifying_key().to_bytes()))?;
         if let Some(old) = db.get(b"identity")? {
-            ensure!(old == identity, "signer identity mismatch");
+            ensure!(
+                crate::codec::from_slice::<(u64, [u8; 32])>(&old)?
+                    == (chain_id, key.verifying_key().to_bytes()),
+                "signer identity mismatch"
+            );
         } else {
             ensure!(
                 db.iterator(rocksdb::IteratorMode::Start).next().is_none(),
                 "nonempty signer database has no identity"
             );
         }
-        if version == 0 {
+        if version < crate::schema::SIGNER_VERSION {
+            let mut batch = WriteBatch::default();
             if let Some(bytes) = db.get(b"last_vote")? {
-                let vote: Vote = serde_json::from_slice(&bytes)?;
+                let vote: Vote = crate::codec::from_slice(&bytes)?;
                 ensure!(
                     vote.chain_id == chain_id && vote.validator == key.verifying_key().to_bytes(),
                     "stored vote identity mismatch during migration"
                 );
                 vote.verify()?;
+                batch.put(b"last_vote", crate::codec::to_vec(&vote)?);
             }
-            let mut batch = WriteBatch::default();
             batch.put(b"identity", identity);
             batch.put(
                 crate::schema::ROCKSDB_VERSION_KEY,
-                serde_json::to_vec(&crate::schema::SIGNER_VERSION)?,
+                crate::codec::to_vec(&crate::schema::SIGNER_VERSION)?,
             );
             db.write_opt(batch, &crate::journal::durable_write_options())?;
             crate::logging::event(
                 "info",
                 "schema_migrated",
-                serde_json::json!({"database":"signer","from":0,"to":crate::schema::SIGNER_VERSION}),
+                serde_json::json!({"database":"signer","from":version,"to":crate::schema::SIGNER_VERSION}),
             );
         }
         Ok(Self { key, chain_id, db })
@@ -107,7 +112,7 @@ impl DurableSigner {
             signature: vec![],
         };
         if let Some(bytes) = self.db.get(b"last_vote")? {
-            let old: Vote = serde_json::from_slice(&bytes)?;
+            let old: Vote = crate::codec::from_slice(&bytes)?;
             let prior = (old.height, old.round, old.phase);
             let next = (height, round, phase);
             ensure!(next >= prior, "refusing to sign an older consensus step");
@@ -119,7 +124,7 @@ impl DurableSigner {
         vote.signature = self.key.sign(&vote.sign_bytes()).to_bytes().to_vec();
         let options = crate::journal::durable_write_options();
         self.db
-            .put_opt(b"last_vote", serde_json::to_vec(&vote)?, &options)?;
+            .put_opt(b"last_vote", crate::codec::to_vec(&vote)?, &options)?;
         Ok(vote)
     }
 }
@@ -252,10 +257,10 @@ impl VoteSet {
 pub struct RoundLock {
     pub chain: u64,
     pub height: u64,
-    locked: Option<(u32, Hash)>,
+    pub(crate) locked: Option<(u32, Hash)>,
     // Required in serialized state: legacy snapshots cannot recover a forgotten nil round.
     #[serde(deserialize_with = "Option::deserialize")]
-    certificate_round: Option<u32>,
+    pub(crate) certificate_round: Option<u32>,
 }
 impl RoundLock {
     pub fn new(chain: u64, height: u64) -> Self {

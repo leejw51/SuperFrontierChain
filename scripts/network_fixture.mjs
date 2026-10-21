@@ -1,3 +1,4 @@
+import {encode} from './capnp-codec.mjs';
 // Deterministic signed workload for the Python-supervised process test.
 // This helper owns no node processes and never sends RPC requests.
 import { Wallet, getCreateAddress, keccak256 } from 'ethers';
@@ -12,7 +13,7 @@ const transfersOnly = process.argv[3] !== undefined;
 if (!Number.isSafeInteger(startNonce) || startNonce < 0 || !Number.isSafeInteger(startNonce + transfers)) throw Error('invalid starting nonce');
 assertTransferCount(transfers);
 function assertTransferCount(count) {
-  if (!Number.isInteger(count) || count < 1 || count > 65536) throw Error('transfer count must be 1..65536');
+  if (!Number.isInteger(count) || count < 1 || count > 262144) throw Error('transfer count must be 1..262144');
 }
 const requests = [
   // Deploy SSTORE(0, 42); return CALLER.
@@ -22,10 +23,16 @@ const requests = [
   ],
   ...Array.from({ length: transfers }, (_, i) => ({ to: recipient.address, value: BigInt(i + 1) })),
 ];
-const raw = await Promise.all(requests.map((request, index) => {
-  const nonce = startNonce + index;
-  const type = nonce % 2 ? 2 : 0;
-  const fees = type === 2 ? { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n } : { gasPrice: 1n };
-  return owner.signTransaction({ ...request, nonce, chainId: 7777, gasLimit: 150_000, type, ...fees });
-}));
-console.log(JSON.stringify({ raw, hashes: raw.map(keccak256), owner: owner.address, recipient: recipient.address, contract }));
+// Bound outstanding signing jobs for longer benchmarks. Holding hundreds of
+// thousands of wallet promises at once otherwise consumes several GiB.
+const raw = [];
+for (let offset = 0; offset < requests.length; offset += 4096) {
+  const signed = await Promise.all(requests.slice(offset, offset + 4096).map((request, index) => {
+    const nonce = startNonce + offset + index;
+    const type = nonce % 2 ? 2 : 0;
+    const fees = type === 2 ? { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n } : { gasPrice: 1n };
+    return owner.signTransaction({ ...request, nonce, chainId: 7777, gasLimit: 150_000, type, ...fees });
+  }));
+  raw.push(...signed);
+}
+process.stdout.write(encode({ raw, hashes: raw.map(keccak256), owner: owner.address, recipient: recipient.address, contract }));

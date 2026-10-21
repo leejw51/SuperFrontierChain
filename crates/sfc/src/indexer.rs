@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Seek, SeekFrom},
+    io::{BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -23,6 +23,10 @@ pub struct Indexer {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
+// Bound catch-up memory and lock hold time. A single large block is never split:
+// rows, counters, and the height cursor commit in the same SQLite transaction.
+const INDEX_BATCH_BLOCKS: usize = 16;
+const INDEX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 
 fn open_writer(path: &Path) -> Result<Connection> {
     let mut db = Connection::open(path)?;
@@ -31,7 +35,7 @@ fn open_writer(path: &Path) -> Result<Connection> {
     db.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=FULL;
-         PRAGMA wal_autocheckpoint=1000;",
+         PRAGMA wal_autocheckpoint=4096;",
     )?;
     crate::schema::migrate_sqlite(&mut db)?;
     db.execute_batch("PRAGMA synchronous=NORMAL;")?;
@@ -43,96 +47,121 @@ fn meta(db: &Connection, key: &str) -> Result<i64> {
 }
 
 fn index_block(db: &Connection, block: &Block) -> Result<()> {
-    ensure!(
-        block.transactions.len() == block.receipts.len(),
-        "block receipt count mismatch"
-    );
-    let header = json!({"height":block.height,"hash":hex_hash(&block.hash()),
-        "timestamp":block.timestamp,"stateRoot":hex_hash(&block.state_root),
-        "parentHash":hex_hash(&block.parent_hash),"transactions":block.transactions.len()});
+    let message = block.read()?;
+    let root = message.get_root::<crate::storage_capnp::block::Reader>()?;
     db.execute(
-        "INSERT INTO blocks(height,hash,json,transaction_count) VALUES (?1,?2,?3,?4)",
+        "INSERT INTO blocks(height,hash,record,transaction_count) VALUES (?1,?2,?3,?4)",
         params![
-            block.height,
+            block.height(),
             hex_hash(&block.hash()),
-            header.to_string(),
-            block.transactions.len() as u64
+            crate::binary::indexed_header_bytes(block)?.as_ref(),
+            block.transaction_count() as u64
         ],
     )?;
     let mut statement =
         db.prepare_cached("INSERT INTO transactions VALUES (?1,?2,?3,?4,?5,?6,?7)")?;
-    for (position, (raw, receipt)) in block.transactions.iter().zip(&block.receipts).enumerate() {
+    for (position, (raw, receipt)) in root
+        .get_transactions()?
+        .iter()
+        .zip(root.get_receipts()?)
+        .enumerate()
+    {
         statement.execute(params![
-            hex_hash(&receipt.transaction_hash),
-            block.height,
+            format!("0x{}", hex::encode(receipt.get_transaction_hash()?)),
+            block.height(),
             position as u64,
-            receipt.from.to_lowercase(),
-            receipt.to.as_ref().map(|s| s.to_lowercase()),
-            raw,
-            serde_json::to_string(receipt)?
+            receipt.get_sender()?.to_str()?,
+            if receipt.get_has_recipient() {
+                Some(receipt.get_recipient()?.to_str()?)
+            } else {
+                None
+            },
+            raw?,
+            crate::binary::receipt_bytes(receipt)?.as_ref()
         ])?;
     }
     db.execute(
         "UPDATE meta SET value=?1 WHERE key='height'",
-        [block.height],
+        [block.height()],
     )?;
     db.execute(
         "UPDATE meta SET value=value+?1 WHERE key='transactions'",
-        [block.transactions.len() as u64],
+        [block.transaction_count() as u64],
     )?;
     Ok(())
 }
 
 fn step(db: &mut Connection, node: &Arc<Mutex<Node>>, data: &Path) -> Result<bool> {
     let next = (meta(db, "height")? + 1) as u64;
-    // Copy at most one block under the node lock, then release it before SQLite work.
-    let (block, earliest) = {
+    // Read a bounded batch under the node lock; SQLite work never holds it.
+    let (blocks, earliest) = {
         let node = node
             .lock()
             .map_err(|_| anyhow::anyhow!("node unavailable"))?;
         let earliest = node.store.earliest_height()?;
-        (node.store.block(next.max(earliest))?, earliest)
+        let mut blocks = Vec::new();
+        let mut bytes = 0;
+        for height in next.max(earliest).. {
+            let Some(block) = node.store.block(height)? else {
+                break;
+            };
+            bytes += block.as_bytes().len();
+            blocks.push(block);
+            if blocks.len() >= INDEX_BATCH_BLOCKS || bytes >= INDEX_BATCH_BYTES {
+                break;
+            }
+        }
+        (blocks, earliest)
     };
     let offset = meta(db, "log_offset")? as u64;
     let mut logs = Vec::new();
     let mut end = offset;
-    if let Ok(file) = File::open(data.join("logs/node.jsonl")) {
+    if let Ok(file) = File::open(data.join("logs/node.capnp")) {
         let mut reader = BufReader::new(file);
         reader.seek(SeekFrom::Start(offset))?;
         for _ in 0..1000 {
-            let mut line = String::new();
-            let bytes = reader.read_line(&mut line)?;
-            if bytes == 0 || !line.ends_with('\n') {
-                break;
-            }
-            // Only complete records advance the durable cursor; crash tails can be retried.
-            let record: Value = serde_json::from_str(&line)?;
+            let bytes = match crate::codec::read_record(&mut reader) {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) => break,
+                // The writer may have published only part of its next frame.
+                // Keep the cursor at the last complete record and retry later.
+                Err(error)
+                    if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|e| e.kind() == std::io::ErrorKind::UnexpectedEof) =>
+                {
+                    break
+                }
+                Err(error) => return Err(error),
+            };
+            let record: Value = crate::codec::from_slice(&bytes)?;
             logs.push(record);
-            end += bytes as u64;
+            end = reader.stream_position()?;
         }
     }
-    let changed = block.is_some() || !logs.is_empty();
+    let changed = !blocks.is_empty() || !logs.is_empty();
     if !changed {
         return Ok(false);
     }
     let tx = db.transaction()?;
-    if earliest > next && block.is_some() {
+    if earliest > next && !blocks.is_empty() {
         tx.execute(
             "UPDATE meta SET value=value+?1 WHERE key='skipped_blocks'",
             [earliest - next],
         )?;
     }
-    if let Some(block) = block {
-        index_block(&tx, &block)?;
+    for block in &blocks {
+        index_block(&tx, block)?;
     }
     for record in &logs {
         tx.execute(
-            "INSERT INTO logs(timestamp_ms,level,event,record) VALUES (?1,?2,?3,?4)",
+            "INSERT INTO logs(timestamp_ms,level,event,message,record) VALUES (?1,?2,?3,?4,?5)",
             params![
                 record["timestamp_ms"].as_u64(),
                 record["level"].as_str(),
                 record["event"].as_str(),
-                record.to_string()
+                format!("{:?}", record["fields"]),
+                crate::codec::to_vec(record)?
             ],
         )?;
     }
@@ -226,6 +255,13 @@ fn transaction_fields(raw: &str) -> Result<Value> {
 
 /// All searches are bounded, parameterized and run against a read-only WAL connection.
 pub fn search(data: &Path, query: &Query) -> Result<Value> {
+    if let Ok(bytes) = std::fs::read(data.join("runtime-info.capnp")) {
+        let runtime: Value = crate::codec::from_slice(&bytes)?;
+        ensure!(
+            runtime["sqliteIndexerEnabled"] != false,
+            "SQLite indexer is disabled (--no-indexer)"
+        );
+    }
     ensure!(query.q.len() <= 256, "query too long (maximum 256 bytes)");
     ensure!(
         [
@@ -268,17 +304,17 @@ pub fn search(data: &Path, query: &Query) -> Result<Value> {
                 statement.query(params![before, limit, terms])?
             };
             while let Some(row) = found.next()? {
-                rows.push(json!({"id":row.get::<_,u64>(0)?, "record":serde_json::from_str::<Value>(&row.get::<_,String>(1)?)?}));
+                rows.push(json!({"id":row.get::<_,u64>(0)?, "record":crate::codec::from_slice::<Value>(&row.get::<_,Vec<u8>>(1)?)?}));
             }
         }
         "blocks" | "blocks_with_transactions" => {
             let populated = query.kind == "blocks_with_transactions";
             let sql = if populated {
-                "SELECT json FROM blocks WHERE transaction_count>0 ORDER BY height DESC LIMIT ?1"
+                "SELECT record FROM blocks WHERE transaction_count>0 ORDER BY height DESC LIMIT ?1"
             } else if query.q.is_empty() {
-                "SELECT json FROM blocks ORDER BY height DESC LIMIT ?1"
+                "SELECT record FROM blocks ORDER BY height DESC LIMIT ?1"
             } else {
-                "SELECT json FROM blocks WHERE hash=?2 OR height=?3 ORDER BY height DESC LIMIT ?1"
+                "SELECT record FROM blocks WHERE hash=?2 OR height=?3 ORDER BY height DESC LIMIT ?1"
             };
             let mut statement = db.prepare(sql)?;
             let mut found = if populated || query.q.is_empty() {
@@ -291,7 +327,7 @@ pub fn search(data: &Path, query: &Query) -> Result<Value> {
                 ])?
             };
             while let Some(row) = found.next()? {
-                let mut block: Value = serde_json::from_str(&row.get::<_, String>(0)?)?;
+                let mut block = crate::binary::indexed_header_value(&row.get::<_, Vec<u8>>(0)?)?;
                 block["transactionCount"] = block["transactions"].clone();
                 rows.push(block);
             }
@@ -314,12 +350,12 @@ pub fn search(data: &Path, query: &Query) -> Result<Value> {
                 query.before_position.unwrap_or(u32::MAX)
             ])?;
             while let Some(row) = found.next()? {
-                let raw = row.get::<_, String>(2)?;
+                let raw = format!("0x{}", hex::encode(row.get::<_, Vec<u8>>(2)?));
                 rows.push(
                     json!({"hash":row.get::<_,String>(0)?, "height":row.get::<_,u64>(1)?,
                     "position":row.get::<_,u32>(4)?, "transaction":transaction_fields(&raw)?,
                     "raw":if query.kind == "receipts" {None} else {Some(raw)},
-                    "receipt":serde_json::from_str::<Value>(&row.get::<_,String>(3)?)?}),
+                    "receipt":crate::binary::receipt_value(crate::binary::reader(&row.get::<_,Vec<u8>>(3)?)?.get_root::<crate::storage_capnp::receipt::Reader>()?)?}),
                 );
             }
             if rows.len() > limit as usize {

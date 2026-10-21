@@ -139,8 +139,8 @@ fn nil_certificate_keeps_round_guard_across_serialization() {
     .unwrap();
     lock.apply_prevote_certificate(&validators, 6, None, &certificate(6, None))
         .unwrap();
-    let encoded = serde_json::to_vec(&lock).unwrap();
-    let mut lock: RoundLock = serde_json::from_slice(&encoded).unwrap();
+    let encoded = sfc::codec::to_vec(&lock).unwrap();
+    let mut lock: RoundLock = sfc::codec::from_slice(&encoded).unwrap();
     assert!(lock
         .apply_prevote_certificate(
             &validators,

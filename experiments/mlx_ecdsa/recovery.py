@@ -295,3 +295,10 @@ def unpack(rows):
     encoded = rows[:, 1:].reshape(-1, 2, 8)[:, :, ::-1].astype('>u4').tobytes().hex()
     return ['04' + encoded[i*128:(i+1)*128] if status else None
             for i, status in enumerate(rows[:, 0].tolist())]
+
+
+def unpack_bytes(rows):
+    """Binary public keys for the node IPC; avoid hex encode/decode round trips."""
+    if np.any(rows[:,0]>1):raise AssertionError('invalid GPU status')
+    encoded=rows[:,1:].reshape(-1,2,8)[:,:,::-1].astype('>u4').tobytes()
+    return [b'\x04'+encoded[i*64:(i+1)*64] if status else b'' for i,status in enumerate(rows[:,0].tolist())]

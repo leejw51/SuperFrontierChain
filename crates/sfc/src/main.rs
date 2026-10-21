@@ -23,9 +23,9 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Create JSON configuration and genesis without overwriting existing files.
+    /// Create Cap'n Proto configuration and genesis without overwriting existing files.
     Init {
-        #[arg(long, default_value = ".sfc")]
+        #[arg(long, default_value = ".sfc-v3")]
         home: PathBuf,
         #[arg(long)]
         archive: bool,
@@ -34,18 +34,24 @@ enum Command {
     },
     /// Run the explicitly enabled local development sequencer.
     Run {
-        #[arg(long, default_value = ".sfc/config.json")]
+        #[arg(long, default_value = ".sfc-v3/config.capnp")]
         config: PathBuf,
         #[arg(long, value_enum)]
         verification_backend: Option<sfc::verification::Backend>,
+        /// In-process MLX (default for new configs) or direct Metal.
+        #[arg(long, value_enum)]
+        gpu_runtime: Option<sfc::verification::GpuRuntime>,
+        /// Disable the rebuildable SQLite explorer/log index; RocksDB commits remain enabled.
+        #[arg(long)]
+        no_indexer: bool,
     },
     /// Query a peer through Cap'n Proto RPC.
     PeerStatus {
-        #[arg(long, value_enum, default_value = "http3")]
+        #[arg(long, value_enum, default_value = "tcp")]
         transport: sfc::config::Transport,
         #[arg(long, default_value = "127.0.0.1:26656")]
         address: std::net::SocketAddr,
-        #[arg(long, default_value = ".sfc/peer-cert.der")]
+        #[arg(long, default_value = ".sfc-v3/peer-cert.der")]
         certificate: PathBuf,
     },
 }
@@ -54,10 +60,9 @@ fn now() -> Result<u64> {
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs())
 }
-fn write_new(path: PathBuf, value: &impl serde::Serialize) -> Result<()> {
+fn write_new(path: PathBuf, value: &impl sfc::codec::Record) -> Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(&serde_json::to_vec_pretty(value)?)?;
-    file.write_all(b"\n")?;
+    file.write_all(&sfc::codec::to_vec(value)?)?;
     file.sync_all()?;
     Ok(())
 }
@@ -65,8 +70,11 @@ fn init(home: PathBuf, archive: bool, backend: sfc::verification::Backend) -> Re
     fs::create_dir_all(&home)?;
     let home = fs::canonicalize(home)?;
     ensure!(
-        !home.join("config.json").exists() && !home.join("genesis.json").exists(),
-        "configuration already exists"
+        !home.join("config.capnp").exists()
+            && !home.join("genesis.capnp").exists()
+            && !home.join("config.json").exists()
+            && !home.join("genesis.json").exists(),
+        "configuration already exists; preserve this home and use a new protocol-v3 directory"
     );
     let genesis = Genesis {
         chain_id: 7777,
@@ -83,7 +91,7 @@ fn init(home: PathBuf, archive: bool, backend: sfc::verification::Backend) -> Re
             ..Default::default()
         },
         data_dir: home.join("data"),
-        genesis: home.join("genesis.json"),
+        genesis: home.join("genesis.capnp"),
         rpc_listen: "127.0.0.1:8545".parse()?,
         capnp_listen: None,
         peer_listen: "127.0.0.1:26656".parse()?,
@@ -101,19 +109,29 @@ fn init(home: PathBuf, archive: bool, backend: sfc::verification::Backend) -> Re
         development: true,
     };
     sfc::network::generate_identity(&config.tls_cert, &config.tls_key)?;
-    write_new(home.join("genesis.json"), &genesis)?;
-    write_new(home.join("config.json"), &config)?;
+    write_new(home.join("genesis.capnp"), &genesis)?;
+    write_new(home.join("config.capnp"), &config)?;
     println!("Initialized {}. The funded development account uses private key 0x...01; never fund it with real assets.",home.display());
     Ok(())
 }
-async fn run(path: PathBuf, backend: Option<sfc::verification::Backend>) -> Result<()> {
+async fn run(
+    path: PathBuf,
+    backend: Option<sfc::verification::Backend>,
+    gpu_runtime: Option<sfc::verification::GpuRuntime>,
+    no_indexer: bool,
+) -> Result<()> {
     let path = fs::canonicalize(path)?;
-    let mut config: Config = serde_json::from_slice(&fs::read(&path)?)?;
+    let mut config: Config = sfc::codec::from_slice(&fs::read(&path)?)?;
+    if let Some(runtime) = gpu_runtime {
+        config.verification.gpu_runtime = runtime;
+    }
     if let Some(backend) = backend {
         config.verification.backend = backend;
     } else if let Ok(value) = std::env::var("SFC_VERIFICATION_BACKEND") {
-        config.verification.backend = serde_json::from_value(serde_json::Value::String(value))
-            .context("SFC_VERIFICATION_BACKEND must be cpu, gpu or hybrid")?;
+        config.verification.backend = <sfc::verification::Backend as clap::ValueEnum>::from_str(
+            &value, false,
+        )
+        .map_err(|_| anyhow::anyhow!("SFC_VERIFICATION_BACKEND must be cpu, gpu or hybrid"))?;
     }
     let parent = path.parent().context("config directory")?;
     if config.data_dir.is_relative() {
@@ -133,14 +151,9 @@ async fn run(path: PathBuf, backend: Option<sfc::verification::Backend>) -> Resu
             peer.certificate = parent.join(&peer.certificate);
         }
     }
-    for path in [
-        &mut config.verification.python,
-        &mut config.verification.worker,
-    ] {
-        if path.is_relative() {
-            *path = parent.join(&*path);
-        }
-    }
+    // Both sync transports listen by default. TCP and UDP may share a port;
+    // an explicit Capnp address can select a different TCP port.
+    config.capnp_listen.get_or_insert(config.peer_listen);
     config.validate()?;
     let http = tokio::net::TcpListener::bind(config.rpc_listen).await?;
     let peer = sfc::network::endpoint(&config)?;
@@ -152,20 +165,30 @@ async fn run(path: PathBuf, backend: Option<sfc::verification::Backend>) -> Resu
         config.clone(),
         Application::default(),
     )?));
+    let _: Config = sfc::codec::upgrade_file(&path)?;
     // RocksDB ownership must be established before repairing/appending the log.
     sfc::logging::initialize(&config.data_dir)?;
     fs::write(
-        config.data_dir.join("runtime-info.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
+        config.data_dir.join("runtime-info.capnp"),
+        sfc::codec::to_vec(&serde_json::json!({
             "config":fs::canonicalize(&path)?,
             "nodeHome":fs::canonicalize(parent)?,
             "binary":std::env::current_exe()?,
-            "gpuPython":config.verification.python,
-            "gpuWorker":config.verification.worker,
-            "tlsKeyLocation":config.tls_key
+            "gpuRuntime":config.verification.gpu_runtime,
+            "gpuPython":null,
+            "gpuWorker":null,
+            "tlsKeyLocation":config.tls_key,
+            "sqliteIndexerEnabled":!no_indexer
         }))?,
     )?;
-    let _indexer = sfc::indexer::Indexer::start(node.clone(), config.data_dir.clone())?;
+    let _indexer = if no_indexer {
+        None
+    } else {
+        Some(sfc::indexer::Indexer::start(
+            node.clone(),
+            config.data_dir.clone(),
+        )?)
+    };
     sfc::logging::event(
         "info",
         "node_started",
@@ -173,7 +196,9 @@ async fn run(path: PathBuf, backend: Option<sfc::verification::Backend>) -> Resu
             "role":config.sync_peer.as_ref().map(|_| "follower").unwrap_or("sequencer"),
             "rpc":config.rpc_listen,"http3":config.peer_listen,"capnp_tcp":config.capnp_listen,
             "block_interval_ms":config.block_interval_ms,"retention":config.retention,
-            "verification_backend":config.verification.backend
+            "verification_backend":config.verification.backend,
+            "gpu_runtime":config.verification.gpu_runtime,
+            "sqlite_indexer_enabled":!no_indexer
         }),
     );
     let producer_node = node.clone();
@@ -191,7 +216,7 @@ async fn run(path: PathBuf, backend: Option<sfc::verification::Backend>) -> Resu
                 let block = node.lock()
                     .map_err(|_| anyhow::anyhow!("node lock poisoned"))?
                     .produce(now()?)?;
-                sfc::logging::event("info", "block_produced", serde_json::json!({"height":block.height,"transactions":block.transactions.len(),"hash":sfc::types::hex_hash(&block.hash())}));
+                sfc::logging::event("info", "block_produced", serde_json::json!({"height":block.height(),"transactions":block.transaction_count(),"hash":sfc::types::hex_hash(&block.hash())}));
                 Ok::<(), anyhow::Error>(())
             })
             .await??;
@@ -227,7 +252,9 @@ async fn main() {
                 Command::Run {
                     config,
                     verification_backend,
-                } => run(config, verification_backend).await,
+                    gpu_runtime,
+                    no_indexer,
+                } => run(config, verification_backend, gpu_runtime, no_indexer).await,
                 Command::PeerStatus {
                     transport,
                     address,
@@ -240,7 +267,7 @@ async fn main() {
                         server_name: "localhost".into(),
                     })
                     .await?;
-                    println!("{}", peer.status().await?);
+                    std::io::stdout().write_all(&sfc::codec::to_vec(&peer.status().await?)?)?;
                     Ok(())
                 }
             }

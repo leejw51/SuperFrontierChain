@@ -3,7 +3,10 @@
 import argparse
 import hashlib
 import importlib.util
-import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+import sfc_codec as codec
 from pathlib import Path
 import random
 import statistics
@@ -19,8 +22,8 @@ HERE = Path(__file__).resolve().parent
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--fixtures', type=Path, default=ROOT/'target/gpu-enhancement/latency-fixtures.json')
-    parser.add_argument('--output', type=Path, default=ROOT/'target/gpu-enhancement/latency.json')
+    parser.add_argument('--fixtures', type=Path, default=ROOT/'target/gpu-enhancement/latency-fixtures.capnp')
+    parser.add_argument('--output', type=Path, default=ROOT/'target/gpu-enhancement/latency.capnp')
     parser.add_argument('--trials', type=int, default=7)
     parser.add_argument('--iterations', type=int, default=3)
     args = parser.parse_args()
@@ -30,7 +33,7 @@ def main():
         args.fixtures.parent.mkdir(parents=True, exist_ok=True)
         fixture = subprocess.check_output([ROOT/'target/release/examples/ecdsa_oracle', 'generate', '65536'])
         args.fixtures.write_bytes(fixture)
-    cases = json.loads(args.fixtures.read_text())
+    cases = codec.loads(args.fixtures.read_bytes())
     if len(cases) < 65536:
         parser.error('fixtures must include at least 65536 cases')
     validation = validate(cases)
@@ -69,7 +72,7 @@ def main():
                   source_sha256={str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in sources}, samples=rows)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2)+'\n')
+    codec.write(args.output, report)
     print('Report:', args.output)
 
 

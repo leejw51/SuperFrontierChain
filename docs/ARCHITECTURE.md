@@ -2,8 +2,8 @@
 
 SuperFroniterChain is an MIT-licensed Rust blockchain framework. Its current runtime
 is a development sequencer with independently replaying followers. It executes
-Ethereum contracts using REVM and synchronizes through Cap’n Proto RPC, with HTTP/3
-as the default transport. See [quickstart](QUICKSTART.md) for operating commands and
+Ethereum contracts using REVM and synchronizes through Cap’n Proto RPC, with TCP
+as the default loopback transport and HTTP/3 for TLS/QUIC peers. See [quickstart](QUICKSTART.md) for operating commands and
 [protocol](PROTOCOL.md) for the wire interface.
 
 See the [2026-10-20 review](REVIEW-2026-10-20.md) for verified fixes, determinism
@@ -12,13 +12,13 @@ evidence, production design gaps, the CometBFT/SDK direction and MLX assessment.
 ```text
 Ethereum clients -- HTTP JSON-RPC --> bounded admission --> pending EVM cache
                                                            |
-                                                100 ms block scheduler
+                                                10 ms block scheduler
                                                            |
                                                single-pass execution
                                                            |
                                                atomic RocksDB commit
                                                            |
-                                            durable hourly JSONL projection
+                                            durable hourly Cap’n Proto projection
 
 Follower -- TLS + QUIC + HTTP/3 -- Cap'n Proto RPC -- block batches
      |                                                   |
@@ -33,10 +33,10 @@ account/code/storage conversion.
 transactions reject a block; invalid pending entries are dropped during selection.
 `journal`: shared explicit RocksDB WAL and synchronous-write policy, automatic WAL
 flush, paranoid checks, and absolute-consistency recovery for state and signing records.
-`storage`: JSON records, atomic synchronous batches, indexed receipts, seven-day
-history pruning, hourly JSONL projection/recovery. Account writes are differential.
+`storage`: Cap’n Proto records, atomic synchronous batches, indexed receipts, seven-day
+history pruning, hourly Cap’n Proto projection/recovery. Account writes are differential.
 Committed head bytes/hash are cached only after a successful durable batch write;
-the cached bytes also supply the JSONL projection.
+the cached bytes also supply the Cap’n Proto projection.
 `consensus`: Ed25519 votes, weighted strict >2/3 certificates, equivocation checks,
 round locks and process-locked persistent anti-double-sign records.
 `network`: typed capability RPC inside an HTTP/3 full-duplex POST body. Quinn handles
@@ -76,7 +76,7 @@ cache, but still independently execute and verify every imported block.
 4. The application computes its state commitment and builds receipts and the block.
 5. One durable RocksDB batch commits account deltas, metadata, block, head, and
    receipt indexes. The node updates its in-memory head and pending cache.
-6. Maintenance appends the JSONL projection and prunes expired history.
+6. Maintenance appends the Cap’n Proto projection and prunes expired history.
 7. Followers request blocks, independently replay them, compare roots, and commit.
 
 The timer skips missed ticks; 100 ms is a configured target, not a guaranteed
@@ -100,7 +100,7 @@ cleans up failed starts. `make stop` requests graceful shutdown and escalates af
 ten seconds. The service does not automatically restart a crashed node.
 
 `make testnet` instead uses `scripts/supervisor.py`: one sequencer and N−1 followers,
-shared genesis, individual state directories and TLS identities, separate JSONL
+shared genesis, individual state directories and TLS identities, separate Cap’n Proto
 logs, and bounded crash restarts with backoff. Its manifest and status file are
 local process-management records, not consensus state. Both managers use Python's
 standard library on macOS/Linux.
@@ -112,10 +112,11 @@ reports head, retention, pending count, state account count, and configured upst
 Polling is every two seconds with an explicit stale-data state. It does not measure
 peer count or follower lag. No additional frontend server or build is needed.
 
-Structured runtime logs serialize one JSON object per stderr line with timestamp,
-level, event, process ID, and event fields. Process managers append node output to
-`node.jsonl`; logs are not automatically rotated. Runtime logging is best-effort
-and separate from durable blockchain records.
+Structured runtime events are stored as length-framed Cap’n Proto in
+`data/logs/node.capnp`. Process managers append readable stderr to `node.log`.
+Logs are not automatically rotated. Runtime logging is best-effort and separate
+from durable blockchain records. Dashboard APIs return `application/x-capnp`;
+the bundled browser decoder restores typed values for display.
 
 ## Trust and failure model
 
@@ -127,7 +128,7 @@ Do not equate the tested consensus library with a deployed consensus network.
 
 State execution occurs before persistence. A commit writes changed accounts, state
 metadata, block, head height and transaction indexes atomically with WAL sync enabled.
-If JSONL maintenance fails after a commit, the sequencer stops; restart reconstructs
+If Cap’n Proto maintenance fails after a commit, the sequencer stops; restart reconstructs
 the projection from committed records. No automatic acceptance of unverified snapshots.
 Mempool contents are volatile; a submitted transaction is not durable until mined.
 Admission validates exact sequential nonces; replacement and nonce-gap queues are
@@ -151,7 +152,7 @@ State commitments still serialize the complete ordered state. EVM preparation lo
 current accounts into an in-memory cache and block isolation clones state. Startup
 projection repair is linear in retained history and currently builds it in memory.
 Large states and long archives therefore need incremental authenticated state and
-streaming repair before production. JSONL is not an independent import format yet.
+streaming repair before production. Cap’n Proto is not an independent import format yet.
 The selected verifier recovers independent transaction signatures. JSON-RPC batch
 authentication runs without holding the state mutex; ordered admission, EVM execution
 and state queries still use it. Imported blocks verify signatures in parallel before
@@ -164,8 +165,17 @@ batch reports the first invalid transaction in input order regardless of worker 
 Every state/pruning batch and every signing-guard update uses WAL-enabled,
 synchronous writes. A block's account deltas, metadata, head, history and receipt
 indexes share one atomic WriteBatch and one WAL synchronization; there is no
-per-transaction journal sync. JSONL remains a recoverable history projection, not
+per-transaction journal sync. Cap’n Proto remains a recoverable history projection, not
 the transaction journal.
+
+History appends reuse an open hourly file and borrow the committed block bytes.
+Maintenance syncs the projection when 100 ms has elapsed or at least 8 MiB has
+been appended, and also at segment rotation and clean close. The interval is
+checked during maintenance, not by a background timer; an idle projection may
+remain unsynced until the next maintenance call or close. A partial append is
+truncated before retry. A crash may lose projection bytes, but restart rebuilds
+them from the already-synced retained RocksDB blocks. No consensus format or
+authoritative WAL policy changes are involved.
 
 WAL files are native binary `*.log` files in the RocksDB directory (`data/rocksdb`
 for the chain; the caller-selected directory for `DurableSigner`). RocksDB manages
@@ -179,9 +189,9 @@ refusing to start over silently rolling back a chain head or forgetting a signed
 a damaged journal requires operator recovery. Normal intact WALs replay automatically.
 
 `make test-journal` starts a writer subprocess, acknowledges a block and signed vote,
-then kills it without closing either database or exporting the block to JSONL.
+then kills it without closing either database or exporting the block to Cap’n Proto.
 The test verifies that no SST files exist, reopens through WAL recovery, checks the
-state/head/receipt index, repairs JSONL, and confirms double-sign protection survives.
+state/head/receipt index, repairs Cap’n Proto, and confirms double-sign protection survives.
 A separate checksum-corruption test verifies that both database types refuse startup.
 These tests simulate a process crash, not physical power loss or faulty storage.
 
@@ -198,7 +208,7 @@ context remains part of current state.
 Pruning runs on open and after production/import. Large backlogs are deleted in
 WAL-synchronized batches bounded by 256 blocks or roughly 8 MiB of delete operations,
 checked after each block. A restart resumes from remaining records. Expired whole
-JSONL hours are removed; a boundary segment may contain less than one extra hour
+Cap’n Proto hours are removed; a boundary segment may contain less than one extra hour
 until rotation, and restart reconstructs the exact retained projection. RocksDB
 compaction asynchronously reclaims physical space.
 
@@ -215,13 +225,14 @@ use an archive peer; automatic snapshot synchronization is not implemented.
 | HTTP/3 and Cap’n Proto | `make test-http3`, `make test-rpc` |
 | Catch-up and rejection paths | `make test-sync` |
 | Journal crash recovery | `make test-journal` |
-| JSONL logs and dashboard endpoints | `make smoke` |
+| Cap’n Proto logs and dashboard endpoints | `make smoke` |
 | ERC-20 behavior and replay | `make erc20` |
 | Background lifecycle | `make test-service` |
 | Supervised multi-node recovery | `make test-supervisor` |
 | Two-node emergency fault injection | `make test-emergencies`, [scenario details](EMERGENCY-TESTS.md) |
 | Archive/pruning transitions | `make test-pruning` |
-| Local processing performance | `make benchmark` |
+| Local processing performance | `make bench` |
+| Rust HTTP committed TPS / CPU | `make benchmark` |
 | Two-node HTTP admission and durable replay | `make bench-network` |
 
 The execution benchmark excludes network transit and scheduling waits; the
@@ -237,7 +248,7 @@ Mempool duplicate lookup uses `BTreeSet`; the queue defines transaction ordering
 REVM's returned account and storage changes are sorted before application. World
 serialization and state commitments use ordered maps, while receipts and logs
 preserve execution order. CPU/GPU/HYBRID results are collected in input order;
-state mutation never follows completion order. The MLX kernel uses exact integer
+state mutation never follows completion order. The native Metal kernel uses exact integer
 modular arithmetic. See [backend validation and limits](VERIFICATION-BACKENDS.md).
 
 Admission uses the last committed block timestamp. Production/replay receive an

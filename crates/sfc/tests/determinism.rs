@@ -47,8 +47,8 @@ fn evm_state_and_execution_ignore_insertion_order() {
     assert_eq!(a, b);
     assert_eq!(a.root(), b.root());
     assert_eq!(
-        serde_json::to_vec(&a).unwrap(),
-        serde_json::to_vec(&b).unwrap()
+        sfc::codec::to_vec(&a).unwrap(),
+        sfc::codec::to_vec(&b).unwrap()
     );
 }
 
@@ -140,7 +140,7 @@ fn block_context_has_stable_commitments_after_pruning_and_restart() {
     node.submit(&common::signed(0, None, 0, &init, 200_000, 7777))
         .unwrap();
     let deployment = node.produce(common::genesis().timestamp + 1).unwrap();
-    let address: Address = deployment.receipts[0]
+    let address: Address = deployment.receipts().unwrap()[0]
         .contract_address
         .as_ref()
         .unwrap()
@@ -161,7 +161,7 @@ fn block_context_has_stable_commitments_after_pruning_and_restart() {
     node.submit(&common::signed(1, Some(address), 0, &[], 200_000, 7777))
         .unwrap();
     let block = node.produce(common::genesis().timestamp + 258).unwrap();
-    assert!(block.receipts[0].success);
+    assert!(block.receipts().unwrap()[0].success);
     let slots = &node.world().unwrap().accounts[&format!("{address:#x}")].storage;
     assert_eq!(slots["0"], (common::genesis().timestamp + 258).to_string());
     assert_eq!(slots["1"], "258");
@@ -169,13 +169,13 @@ fn block_context_has_stable_commitments_after_pruning_and_restart() {
     assert_eq!(slots["3"], U256::from_be_bytes(parent_hash).to_string());
     assert_eq!(slots["4"], U256::from_be_bytes(boundary_hash).to_string());
     assert!(!slots.contains_key("5")); // Out-of-window hash is zero, canonicalized away.
-                                       // Fixed vectors also detect accidental consensus changes across builds/platforms.
+                                       // Protocol-v3 typed-segment vectors also detect accidental consensus changes across builds/platforms.
     assert_eq!(
-        hex_hash(&block.state_root),
-        "0xb282fe8f4c8063dbb920913e3eee81d42c2d42b6083ab2bbb1f58ca4ebf0092e"
+        hex_hash(&block.state_root()),
+        "0xa18ea46976f3fd13c47b014e1a2b4c1e564e0bac6d6c8564390a3a95576c94f5"
     );
     assert_eq!(
         hex_hash(&block.hash()),
-        "0xd0128df0aa19d4cfc34755976e1d4e0c3a0a0358dd6239864e036e0ad45ec0fe"
+        "0x7fec2ecfb03bf08d5e805b78be62f697019944bba8f5620ea5050855ad654d0e"
     );
 }

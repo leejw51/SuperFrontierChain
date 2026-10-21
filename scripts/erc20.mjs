@@ -1,3 +1,4 @@
+import {encode,decode} from './capnp-codec.mjs';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,7 +20,7 @@ async function freePort(udp = false) {
 const binary = resolve('target/debug/sfc');
 const home = mkdtempSync(join(tmpdir(), 'sfc-erc20-'));
 let process, follower;
-const log = openSync(join(home, 'node.jsonl'), 'w+');
+const log = openSync(join(home, 'node.log'), 'w+');
 let id = 0;
 async function stop(child) {
   if (child && child.exitCode === null) {
@@ -33,11 +34,11 @@ async function stop(child) {
 try {
   const initialized = spawnSync(binary, ['init', '--home', home], { encoding: 'utf8' });
   assert.equal(initialized.status, 0, initialized.stderr);
-  const config = JSON.parse(readFileSync(join(home, 'config.json')));
+  const config = decode(readFileSync(join(home, 'config.capnp')));
   config.rpc_listen = `127.0.0.1:${await freePort()}`;
   config.peer_listen = `127.0.0.1:${await freePort(true)}`;
   config.block_interval_ms = 500;
-  writeFileSync(join(home, 'config.json'), JSON.stringify(config));
+  writeFileSync(join(home, 'config.capnp'), encode(config));
   const url = `http://${config.rpc_listen}`;
   async function rpc(method, params = [], target = url) {
     const response = await fetch(target, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }), signal: AbortSignal.timeout(5000) });
@@ -49,7 +50,7 @@ try {
     for (let i = 0; i < 200; i++) { try { const result = await fn(); if (result) return result; } catch {} await sleep(50); }
     throw Error('timed out waiting for node');
   }
-  function launch() { return spawn(binary, ['run', '--config', join(home, 'config.json')], { stdio: ['ignore', log, log] }); }
+  function launch() { return spawn(binary, ['run', '--config', join(home, 'config.capnp')], { stdio: ['ignore', log, log] }); }
   process = launch();
   await waitFor(() => rpc('eth_chainId'));
   const owner = new Wallet('0x' + '0'.repeat(63) + '1');
@@ -122,13 +123,13 @@ try {
   // A follower replays the actual deployment and token transactions over HTTP/3.
   const followerHome = join(home, 'follower');
   assert.equal(spawnSync(binary, ['init', '--home', followerHome]).status, 0);
-  const followerConfig = JSON.parse(readFileSync(join(followerHome, 'config.json')));
+  const followerConfig = decode(readFileSync(join(followerHome, 'config.capnp')));
   followerConfig.rpc_listen = `127.0.0.1:${await freePort()}`;
   followerConfig.peer_listen = `127.0.0.1:${await freePort(true)}`;
   followerConfig.sync_peer = { address: config.peer_listen, server_name: 'localhost', certificate: config.tls_cert };
   writeFileSync(followerConfig.genesis, readFileSync(config.genesis));
-  writeFileSync(join(followerHome, 'config.json'), JSON.stringify(followerConfig));
-  follower = spawn(binary, ['run', '--config', join(followerHome, 'config.json')], { stdio: ['ignore', log, log] });
+  writeFileSync(join(followerHome, 'config.capnp'), encode(followerConfig));
+  follower = spawn(binary, ['run', '--config', join(followerHome, 'config.capnp')], { stdio: ['ignore', log, log] });
   const followerUrl = `http://${followerConfig.rpc_listen}`;
   await waitFor(async () => await read('balanceOf', [recipient.address], followerUrl) === 140n);
   assert.equal(await read('allowance', [owner.address, spender.address], followerUrl), 10n);
@@ -138,7 +139,7 @@ try {
   assert.equal(await read('allowance', [owner.address, spender.address]), 10n);
   console.log('PASS: Solidity ERC-20 deployment, estimateGas, transfer, approve, transferFrom, events, revert, replay rejection, restart, Rayon JSON-RPC batches and HTTP/3 follower sync');
 } catch (error) {
-  console.error(readFileSync(join(home, 'node.jsonl'), 'utf8'));
+  console.error(readFileSync(join(home, 'node.log'), 'utf8'));
   throw error;
 } finally {
   await stop(follower); await stop(process); closeSync(log); rmSync(home, { recursive: true, force: true });

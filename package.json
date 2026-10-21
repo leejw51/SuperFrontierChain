@@ -7,14 +7,17 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.3.0",
+    "capnp-es": "0.0.14",
     "esbuild": "0.28.2",
     "ethers": "6.17.0",
     "motion": "14.4.0",
     "solc": "0.8.37",
     "tailwindcss": "4.3.0",
-    "three": "0.186.1"
+    "three": "0.186.1",
+    "typescript": "5.9.3"
   },
   "overrides": {
     "tmp": "0.2.7"
-  }
+  },
+  "type": "module"
 }

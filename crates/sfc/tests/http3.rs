@@ -170,8 +170,8 @@ async fn capnp_http3_batches_concurrent_calls_and_reconnect() {
                     assert_eq!(status.unwrap()["height"], 70);
                     let blocks = blocks.unwrap();
                     assert_eq!(blocks.len(), 64);
-                    assert_eq!(blocks.first().unwrap().height, 1);
-                    assert_eq!(blocks.last().unwrap().height, 64);
+                    assert_eq!(blocks.first().unwrap().height(), 1);
+                    assert_eq!(blocks.last().unwrap().height(), 64);
                     let mut request = client.client.get_blocks_request();
                     request.get().set_start(1);
                     request.get().set_limit(u32::MAX);
@@ -250,14 +250,16 @@ async fn sync_rejects_divergence_and_pruned_gaps_without_changing_state() {
                 let genesis_hash = follower.lock().unwrap().head().hash();
                 let valid = client.blocks(1).await.unwrap().remove(0);
                 for kind in 0..4 {
-                    let mut invalid = valid.clone();
+                    let mut invalid = common::block_draft(&valid);
                     match kind {
                         0 => invalid.chain_id += 1,
                         1 => invalid.parent_hash[0] ^= 1,
                         2 => invalid.state_root[0] ^= 1,
-                        _ => invalid.transactions = vec![vec![0xff]],
+                        _ => invalid.transactions = vec![vec![0xff].into()],
                     }
-                    assert!(follower.lock().unwrap().import(invalid).is_err());
+                    assert!(sfc::types::Block::build(invalid)
+                        .and_then(|b| follower.lock().unwrap().import_encoded(b))
+                        .is_err());
                     assert_eq!(follower.lock().unwrap().head().hash(), genesis_hash);
                     assert_eq!(
                         follower.lock().unwrap().store.head().unwrap().hash(),

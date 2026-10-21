@@ -4,7 +4,10 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
-import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+import sfc_codec as codec
 from pathlib import Path
 import platform
 import random
@@ -24,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output',type=Path,default=ROOT/'target/mlx-ecdsa/optimized.json')
+    parser.add_argument('--output',type=Path,default=ROOT/'target/mlx-ecdsa/optimized.capnp')
     parser.add_argument('--trials',type=int,default=7)
     parser.add_argument('--iterations',type=int,default=3)
     parser.add_argument('--gpu-fraction',type=float,default=0.4)
@@ -32,10 +35,10 @@ def main():
     if not 1 <= args.trials <= 20 or not 1 <= args.iterations <= 10 or not 0.1 <= args.gpu_fraction <= 0.9:
         parser.error('invalid trials, iterations or GPU fraction')
     oracle = ROOT/'target/release/examples/ecdsa_oracle'
-    fixture = ROOT/'target/mlx-ecdsa/optimized-fixtures.json'
+    fixture = ROOT/'target/mlx-ecdsa/optimized-fixtures.capnp'
     fixture.parent.mkdir(parents=True,exist_ok=True)
     fixture.write_bytes(subprocess.check_output([oracle,'generate','65536']))
-    cases = json.loads(fixture.read_bytes())
+    cases = codec.loads(fixture.read_bytes())
     gpu, reference = Recovery(), ReferenceRecovery()
     validation = validate(cases,gpu)
     print(f'PASS: {validation}',flush=True)
@@ -117,7 +120,7 @@ def main():
                 print(count,backend,round(statistics.median(r['recoveries_per_second'] for r in samples)),
                       'recoveries/sec',flush=True)
         args.output.parent.mkdir(parents=True,exist_ok=True)
-        args.output.write_text(json.dumps(report,indent=2)+'\n')
+        codec.write(args.output, report)
         print(f'Report: {args.output}',flush=True)
     finally:
         worker.close()

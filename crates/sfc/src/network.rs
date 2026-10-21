@@ -111,7 +111,7 @@ impl peer::Server for PeerServer {
                 "batch must contain 1..4096 transactions"
             );
             let mut size = 0usize;
-            let mut raw = Vec::with_capacity(input.len() as usize);
+            let mut borrowed = Vec::with_capacity(input.len() as usize);
             for tx in input.iter() {
                 let tx = tx?;
                 size = size
@@ -121,8 +121,25 @@ impl peer::Server for PeerServer {
                     tx.len() <= crate::types::MAX_TX_BYTES && size <= crate::types::MAX_BLOCK_BYTES,
                     "transaction batch exceeds size limit"
                 );
-                raw.push(Bytes::copy_from_slice(tx));
+                borrowed.push(tx);
             }
+            // Capnp RPC params are local-task owned and cannot cross into the
+            // blocking verifier. Copy payloads once into one slab, then share
+            // slices through verification, the pending queue and execution.
+            let mut slab = bytes::BytesMut::with_capacity(size);
+            for tx in &borrowed {
+                slab.extend_from_slice(tx);
+            }
+            let slab = slab.freeze();
+            let mut offset = 0;
+            let raw: Vec<_> = borrowed
+                .iter()
+                .map(|tx| {
+                    let start = offset;
+                    offset += tx.len();
+                    slab.slice(start..offset)
+                })
+                .collect();
             let verifier = self.verifier.clone();
             let chain = self.chain;
             let decoded = tokio::task::spawn_blocking(move || verifier.decode_shared(&raw, chain));
@@ -247,18 +264,42 @@ impl peer::Server for PeerServer {
         params: peer::SubmitTransactionParams,
         mut results: peer::SubmitTransactionResults,
     ) -> Promise<(), capnp::Error> {
-        let result = (|| {
+        let prepared = (|| -> Result<_> {
+            anyhow::ensure!(
+                self.accepts_transactions,
+                "follower is read-only; submit to the sequencer"
+            );
+            let permit = self
+                .admission
+                .clone()
+                .try_reserve_owned()
+                .map_err(|_| anyhow::anyhow!("submission queue is full"))?;
             let raw = params.get()?.get_raw()?;
-            let hash = self
-                .node
-                .lock()
-                .map_err(cap_error)?
-                .submit(raw)
+            anyhow::ensure!(
+                raw.len() <= crate::types::MAX_TX_BYTES,
+                "transaction too large"
+            );
+            let raw = vec![Bytes::copy_from_slice(raw)];
+            let verifier = self.verifier.clone();
+            let chain = self.chain;
+            let decoded = tokio::task::spawn_blocking(move || verifier.decode_shared(&raw, chain));
+            let (reply, receiver) = tokio::sync::oneshot::channel();
+            permit.send(AdmissionJob { decoded, reply });
+            Ok(receiver)
+        })();
+        let receiver = match prepared {
+            Ok(receiver) => receiver,
+            Err(error) => return Promise::err(cap_error(error)),
+        };
+        Promise::from_future(async move {
+            let mut batch = receiver.await.map_err(cap_error)?.map_err(cap_error)?;
+            let hash = batch
+                .pop()
+                .ok_or_else(|| cap_error("missing submission result"))?
                 .map_err(cap_error)?;
             results.get().set_hash(&hash);
             Ok(())
-        })();
-        Promise::from_future(async move { result })
+        })
     }
     fn get_block(
         &mut self,

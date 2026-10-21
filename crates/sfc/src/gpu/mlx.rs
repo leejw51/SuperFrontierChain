@@ -131,7 +131,10 @@ impl Engine {
         drop(guard);
         Ok(Self { core: Some(core) })
     }
-    pub(super) fn recover(&mut self, inputs: &[RecoveryInput]) -> Result<Keys> {
+    pub(super) fn recover<T: std::borrow::Borrow<RecoveryInput>>(
+        &mut self,
+        inputs: &[T],
+    ) -> Result<Keys> {
         let _guard = GATE
             .lock()
             .map_err(|_| anyhow::anyhow!("MLX lock poisoned"))?;
@@ -247,10 +250,11 @@ impl Core {
             timeout: Duration::from_secs(timeout_seconds),
         })
     }
-    fn recover(&mut self, inputs: &[RecoveryInput]) -> Result<Keys> {
+    fn recover<T: std::borrow::Borrow<RecoveryInput>>(&mut self, inputs: &[T]) -> Result<Keys> {
         ensure!((1..=4096).contains(&inputs.len()), "invalid MLX batch size");
         self.words.clear();
         for input in inputs {
+            let input = input.borrow();
             for bytes in [
                 &input.digest[..],
                 &input.signature[..32],
@@ -363,7 +367,7 @@ mod tests {
         // Construction and evaluation intentionally happen on different threads.
         std::thread::spawn(move || {
             super::super::differential::check(|inputs| engine.recover(inputs));
-            assert!(engine.recover(&[]).is_err());
+            assert!(engine.recover::<super::RecoveryInput>(&[]).is_err());
             let invalid = super::RecoveryInput {
                 digest: [0; 32],
                 signature: [0; 64],

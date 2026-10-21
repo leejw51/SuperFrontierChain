@@ -37,7 +37,20 @@ impl OrderedDb {
         Ok(())
     }
     pub fn apply(&mut self, changes: impl IntoIterator<Item = (Address, Account)>) {
-        let ordered: BTreeMap<_, _> = changes.into_iter().collect();
+        // REVM emits unique account keys. Sort one contiguous allocation rather
+        // than allocating temporary B-tree nodes for every transaction.
+        let mut ordered: Vec<_> = changes.into_iter().collect();
+        ordered.sort_by_key(|(address, _)| *address);
+        // Preserve the previous BTreeMap collection's last-entry-wins behavior
+        // for callers other than REVM that provide duplicate keys.
+        ordered.dedup_by(|later, earlier| {
+            if later.0 == earlier.0 {
+                std::mem::swap(&mut later.1, &mut earlier.1);
+                true
+            } else {
+                false
+            }
+        });
         for (address, account) in ordered {
             if !account.is_touched() {
                 continue;
@@ -55,7 +68,8 @@ impl OrderedDb {
                 .get_mut(&address)
                 .expect("inserted account")
                 .storage;
-            let slots: BTreeMap<_, _> = account.storage.into_iter().collect();
+            let mut slots: Vec<_> = account.storage.into_iter().collect();
+            slots.sort_unstable_by_key(|(key, _)| *key);
             for (key, slot) in slots {
                 let value = slot.present_value();
                 if value.is_zero() {

@@ -103,7 +103,10 @@ impl Engine {
         encoder.dispatch_threads(MTLSize::new(threads as u64, 1, 1), MTLSize::new(32, 1, 1));
         encoder.end_encoding();
     }
-    pub(super) fn recover(&mut self, inputs: &[RecoveryInput]) -> Result<Keys> {
+    pub(super) fn recover<T: std::borrow::Borrow<RecoveryInput>>(
+        &mut self,
+        inputs: &[T],
+    ) -> Result<Keys> {
         ensure!(
             !self.failed,
             "Metal engine must be replaced after a dispatch failure"
@@ -122,6 +125,7 @@ impl Engine {
                 )
             };
             for (input, row) in inputs.iter().zip(rows.as_chunks_mut::<25>().0.iter_mut()) {
+                let input = input.borrow();
                 for (source, target) in [
                     &input.digest[..],
                     &input.signature[..32],

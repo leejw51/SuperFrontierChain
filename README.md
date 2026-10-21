@@ -1,7 +1,12 @@
-# SuperFroniterChain (SFC)
+# Super Frontier Chain (SFC)
+
+![Super Frontier Chain logo](docs/assets/sfc-logo.png)
 
 ## Documentation
 
+- [Implementation specification](docs/SPECIFICATION.md): architecture, flow, binary transports and Ethereum RPC support.
+- [HTML specification](docs/SPECIFICATION.html): styled offline edition; rebuild with `npm run build:docs`.
+- [Execution allocation benchmarks](docs/EXECUTION-ALLOCATION-BENCHMARK.md): alternating release throughput/CPU comparison.
 - [Quickstart](docs/QUICKSTART.md): install prerequisites, start/stop, dashboard, testnet, tests.
 - [Protocol](docs/PROTOCOL.md): HTTP/3, Cap’n Proto RPC, sync rules, Ethereum RPC, limits.
 - [Architecture](docs/ARCHITECTURE.md): execution, storage, journaling, pruning, and operations.

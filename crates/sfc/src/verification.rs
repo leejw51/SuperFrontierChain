@@ -121,7 +121,7 @@ impl GpuEngine {
         }
     }
     #[cfg(target_os = "macos")]
-    fn recover(&mut self, inputs: &[RecoveryInput]) -> Result<Keys> {
+    fn recover<T: std::borrow::Borrow<RecoveryInput>>(&mut self, inputs: &[T]) -> Result<Keys> {
         match self {
             #[cfg(target_os = "macos")]
             Self::Metal(engine) => engine.recover(inputs),
@@ -130,7 +130,7 @@ impl GpuEngine {
         }
     }
     #[cfg(not(target_os = "macos"))]
-    fn recover(&mut self, _: &[RecoveryInput]) -> Result<Keys> {
+    fn recover<T: std::borrow::Borrow<RecoveryInput>>(&mut self, _: &[T]) -> Result<Keys> {
         anyhow::bail!("GPU requires macOS; select CPU explicitly")
     }
     fn pid(&self) -> Option<u32> {
@@ -172,7 +172,7 @@ impl Verifier {
             "gpu_records":self.gpu_records.load(Ordering::Relaxed)}),
         )
     }
-    fn gpu_recover(&self, inputs: &[RecoveryInput]) -> Result<Keys> {
+    fn gpu_recover<T: std::borrow::Borrow<RecoveryInput>>(&self, inputs: &[T]) -> Result<Keys> {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
@@ -193,8 +193,8 @@ impl Verifier {
         }
         result.context("GPU verification failed (no CPU fallback)")
     }
-    fn cpu_recover(&self, inputs: &[RecoveryInput]) -> Keys {
-        let keys = ethereum::ordered_map(inputs, |input| input.cpu_recover().ok());
+    fn cpu_recover<T: std::borrow::Borrow<RecoveryInput> + Sync>(&self, inputs: &[T]) -> Keys {
+        let keys = ethereum::ordered_map(inputs, |input| input.borrow().cpu_recover().ok());
         self.cpu_records
             .fetch_add(inputs.len() as u64, Ordering::Relaxed);
         keys
@@ -225,7 +225,7 @@ impl Verifier {
     ) -> Result<Vec<Result<Transaction>>> {
         let inputs: Vec<_> = prepared
             .iter()
-            .filter_map(|tx| tx.as_ref().ok().map(|tx| tx.recovery.clone()))
+            .filter_map(|tx| tx.as_ref().ok().map(|tx| &tx.recovery))
             .collect();
         let keys = match self.config.backend {
             Backend::Cpu => self.cpu_recover(&inputs),

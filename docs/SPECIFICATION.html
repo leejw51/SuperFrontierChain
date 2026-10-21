@@ -1,0 +1,249 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Super Frontier Chain — architecture, protocol and measured performance."><title>Super Frontier Chain — implementation specification · SFC</title><style>
+:root{color-scheme:dark;--bg:#080e19;--panel:#111b2a;--line:#243447;--ink:#eaf2fa;--muted:#a5b5c7;--mint:#8af0c3}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--mint);text-underline-offset:4px}a:hover{color:white}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}aside{position:fixed;inset:0 auto 0 0;width:270px;padding:30px 24px;border-right:1px solid var(--line);overflow:auto;background:#0b1320}aside img{width:220px;display:block;margin:0 0 22px}aside .caption,.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;font-weight:700;color:var(--mint)}nav a{display:block;text-decoration:none;color:var(--muted);font-size:13px;line-height:1.5;padding:9px 0}nav a.sub{padding-left:14px;font-size:12px}nav a:hover{color:var(--mint)}main{max-width:1220px;margin-left:270px;padding:60px clamp(24px,5vw,84px) 100px}header{border-bottom:1px solid var(--line);padding-bottom:36px;margin-bottom:40px}header .logo{width:min(560px,100%);display:block;margin-bottom:24px}.actions{display:flex;gap:12px;flex-wrap:wrap}.actions a{font-size:12px;border:1px solid var(--line);padding:6px 13px;border-radius:8px;text-decoration:none}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.04em;line-height:1.15;margin:12px 0 24px}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em;margin-top:58px;padding-top:12px}h3{font-size:19px;margin-top:30px}p,li{color:var(--muted)}strong{color:var(--ink)}li{padding:3px 0}code{font: .86em ui-monospace,SFMono-Regular,Consolas,monospace;background:#172335;border:1px solid #223349;border-radius:5px;padding:2px 5px;overflow-wrap:anywhere}pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;overflow:auto;line-height:1.55}pre code{background:none;border:0;padding:0;overflow-wrap:normal}.table-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:24px 0}table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.6}th{text-align:left;background:#192738;color:var(--mint)}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}td{color:var(--muted)}tr:last-child td{border-bottom:0}tr:hover td{background:#132033}.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:9px}.edge{display:grid;grid-template-columns:1fr .9fr 1fr;align-items:center;gap:12px;font-size:12px;line-height:1.5}.node{padding:10px 12px;border:1px solid #30465a;border-radius:8px;color:var(--ink);background:#0e1927}.arrow{text-align:center;color:var(--mint);font-size:11px}.arrow b{display:block;font-size:20px;line-height:1.2}details{margin-top:16px}summary{color:var(--mint);font-size:12px;cursor:pointer}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--muted)}.skip{position:absolute;top:-90px}.skip:focus{top:10px;left:290px;background:var(--panel);padding:10px;z-index:10}@media(max-width:900px){aside{position:static;width:auto;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}aside img{width:165px;margin:0}aside nav,aside .caption{display:none}main{margin:0;padding:30px 22px 60px}h2{margin-top:38px}.edge{grid-template-columns:1fr 70px 1fr;gap:6px}.flow{padding:12px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{aside,.actions,.skip{display:none}main{margin:0;padding:0;max-width:none}body{background:white;color:#111}p,li,td,footer{color:#333}h1,h2,h3,strong{color:#111}a{color:#175d49}pre,.flow,.node,th{background:#f4f7f8;color:#111}.table-scroll,pre,.flow{break-inside:avoid}header .logo{width:300px}}</style></head><body><a class="skip" href="#content">Skip to content</a><aside><a href="SPECIFICATION.html"><img src="assets/sfc-logo.png" alt="SFC — Super Frontier Chain"></a><p class="caption">On this page</p><nav aria-label="Table of contents"><a class="" href="#1-architecture">1. Architecture</a><a class="" href="#2-transaction-and-block-flow">2. Transaction and block flow</a><a class="" href="#3-byte-ownership-and-memory-copies">3. Byte ownership and memory copies</a><a class="" href="#4-state-commitment-and-persistence">4. State commitment and persistence</a><a class="" href="#5-peer-protocol-cap-n-proto-rpc">5. Peer protocol: Cap'n Proto RPC</a><a class="sub" href="#tcp-default">TCP (default)</a><a class="sub" href="#http-3-optional">HTTP/3 (optional)</a><a class="" href="#6-ethereum-compatible-http-rpc">6. Ethereum-compatible HTTP RPC</a><a class="" href="#7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</a><a class="" href="#8-remaining-optimization-targets-not-implemented">8. Remaining optimization targets (not implemented)</a><a class="" href="#9-execution-path-allocation-improvements">9. Execution-path allocation improvements</a></nav></aside><main id="content"><header><img class="logo" src="assets/sfc-logo.png" alt="Super Frontier Chain"><div class="eyebrow">Engineering documentation / SFC</div><p>Architecture. Execution. Evidence.</p><div class="actions"><a href="SPECIFICATION.md">Markdown source ↗</a><a href="SPECIFICATION.html">Specification</a><a href="EXECUTION-ALLOCATION-BENCHMARK.html">Benchmarks</a><a href="ETHEREUM.html">Ethereum compatibility</a></div></header><article><h1 id="super-frontier-chain-implementation-specification">Super Frontier Chain — implementation specification</h1><p>Status: development implementation, 2026-10-21. This document describes the current
+Rust code, not a production L1 or full Ethereum conformance claim. Wire schemas
+are authoritative: <code>crates/sfc/schema/chain.capnp</code>, <code>storage.capnp</code>, <code>runtime.capnp</code>.</p>
+<h2 id="1-architecture">1. Architecture</h2><div class="flow" aria-label="Architecture data flow"><div class="edge"><div class="node">Wallet / Solidity tools</div><div class="arrow">HTTP JSON-RPC<b aria-label="to">→</b></div><div class="node">Ethereum adapter</div></div><div class="edge"><div class="node">Rust Rayon load generator</div><div class="arrow">Capnp RPC: TCP or HTTP/3<b aria-label="to">→</b></div><div class="node">Peer service</div></div><div class="edge"><div class="node">Ethereum adapter</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">CPU / native MLX GPU / HYBRID verifier</div></div><div class="edge"><div class="node">Peer service</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">CPU / native MLX GPU / HYBRID verifier</div></div><div class="edge"><div class="node">CPU / native MLX GPU / HYBRID verifier</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Ordered sequencer pending queue</div></div><div class="edge"><div class="node">Ordered sequencer pending queue</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">REVM Shanghai execution</div></div><div class="edge"><div class="node">REVM Shanghai execution</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Binary Merkle Patricia state trie</div></div><div class="edge"><div class="node">Binary Merkle Patricia state trie</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Atomic RocksDB WAL commit</div></div><div class="edge"><div class="node">Atomic RocksDB WAL commit</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Async SQLite WAL index</div></div><div class="edge"><div class="node">Async SQLite WAL index</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Dashboard / explorer / log search</div></div><div class="edge"><div class="node">Atomic RocksDB WAL commit</div><div class="arrow">Canonical Capnp block bytes<b aria-label="to">→</b></div><div class="node">Verifying followers</div></div><div class="edge"><div class="node">Verifying followers</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Verify signatures / re-execute / compare records</div></div></div><details><summary>View Mermaid source</summary><pre><code>flowchart LR
+    Wallet[Wallet / Solidity tools] --&gt;|HTTP JSON-RPC| RPC[Ethereum adapter]
+    Load[Rust Rayon load generator] --&gt;|Capnp RPC: TCP or HTTP/3| Peer[Peer service]
+    RPC --&gt; Verify[CPU / native MLX GPU / HYBRID verifier]
+    Peer --&gt; Verify
+    Verify --&gt; Queue[Ordered sequencer pending queue]
+    Queue --&gt; EVM[REVM Shanghai execution]
+    EVM --&gt; Trie[Binary Merkle Patricia state trie]
+    Trie --&gt; Commit[Atomic RocksDB WAL commit]
+    Commit --&gt; Index[Async SQLite WAL index]
+    Index --&gt; UI[Dashboard / explorer / log search]
+    Commit --&gt;|Canonical Capnp block bytes| Follower[Verifying followers]
+    Follower --&gt; Replay[Verify signatures / re-execute / compare records]</code></pre></details><p>The sequencer orders transactions and creates blocks. Followers accept replicated
+blocks and verify execution; they reject transaction submission and cannot produce
+blocks. Consensus voting, certificates and locking primitives exist separately, but
+there is <strong>no integrated distributed BFT reactor or validator failover</strong> in the
+running node. Local durable commit is not multi-validator finality.</p>
+<p>Rust owns execution, networking, verification and benchmark generation. Native MLX
+runs inside the node process through MLX-C custom integer GPU kernels. Metal is an
+alternative GPU runtime. CPU and HYBRID modes remain available. GPU failures reject
+the operation; they do not silently fall back to CPU. Python is only supervisor and
+control tooling, outside the measured execution/verification path.</p>
+<h2 id="2-transaction-and-block-flow">2. Transaction and block flow</h2><ol>
+<li>Receive Ethereum signed RLP transaction bytes (protected legacy or type 2).</li>
+<li>Validate batch and payload bounds. Reserve ordered admission capacity before
+launching verification; overloaded requests fail without starting a GPU task.</li>
+<li>Parse fields required by EVM/signature verification, enforce chain ID and
+signature rules, recover signers using the configured backend.</li>
+<li>Admit results in request order. Each batch entry returns its own hash/error;
+malformed entries cannot shift signer/result pairing. Followers are read-only.</li>
+<li>The sequencer executes selected transactions against a candidate state, with
+block gas/byte/count limits. Failed candidate state never becomes committed state.</li>
+<li>Update the Merkle root, build canonical Capnp block bytes containing transactions
+and receipts, and link the previous block hash.</li>
+<li>Atomically commit state, head, block and transaction lookup indices to RocksDB
+with synchronous WAL. Publish the new in-memory head only after durability.</li>
+<li>SQLite indexes committed blocks, transactions, receipts and logs asynchronously.
+Index lag is visible; indexing completion is not the commit boundary.</li>
+<li>Followers obtain encoded blocks, borrow transaction slices, verify and execute,
+then compare reconstructed canonical records with the received block before commit.</li>
+</ol>
+<p>Restart rebuilds the derived trie from stored state and checks the committed head&#39;s
+state root. History projections are repairable; pruning removes old block/receipt
+history according to configured retention. It does not reset current account state.</p>
+<h2 id="3-byte-ownership-and-memory-copies">3. Byte ownership and memory copies</h2><p>Canonical Capnp blocks use <code>bytes::Bytes</code> ownership and borrowed Readers. Storage,
+sync and indexing read fields directly; they do not require a generic JSON value or
+materialized Rust block object. <code>Bytes</code> clones/slices share the original allocation.</p>
+<p>Bulk RPC params are local-task owned. Before dispatch to a blocking verifier, their
+raw transaction payloads are copied once into a shared batch slab, then represented
+as Bytes slices. This replaces a payload allocation per transaction with one per
+batch. A slice keeps its backing batch alive until all slices are released; this is
+a memory-retention tradeoff, not a claim of lower live memory in every workload.
+Partially admitted batches detach surviving raw bytes; revalidation drops likewise
+detach remaining pending payloads so rejected neighbors cannot keep large slabs alive.</p>
+<p>GPU preparation borrows signature-recovery records instead of cloning every digest
+and signature into a second vector. Required integer packing still writes a reused
+Rust staging buffer; MLX-C <code>mlx_array_new_data</code> then copies it into an MLX-owned array.
+This is <strong>not end-to-end zero-copy GPU execution</strong>. The managed-array C API is not
+assumed to be zero-copy or safe for arbitrary Rust allocations without validation.</p>
+<p>EVM execution still materializes numeric transaction/state fields. World account
+maps, REVM backing state, receipt construction and canonical message construction
+still allocate/copy. Capnp storage alone does not remove these costs.</p>
+<h2 id="4-state-commitment-and-persistence">4. State commitment and persistence</h2><p>SFC uses a compressed binary Merkle Patricia trie with Keccak-256, domain-separated
+empty/leaf/branch hashes, and deterministic split-bit ordering. Account leaves hold
+canonical Capnp account bytes; module state and the EVM BLOCKHASH window have separate
+key namespaces. Unchanged branches are shared and only changed paths are rehashed.</p>
+<p>Account storage is currently inside each account value. A per-contract storage trie
+and dirty-slot execution path are <strong>not implemented yet</strong>. Change detection still
+scans public World maps. Proofs are available through Rust APIs, not <code>eth_getProof</code>.
+See <a href="MERKLE-TRIE.html">exact hash format and limitations</a>.</p>
+<p>RocksDB and SQLite support explicit forward schema migrations and reject unknown
+newer schemas. Changing consensus commitment format cannot silently migrate old
+block hashes: old flat-hash homes are preserved and rejected by the Merkle binary.
+SQLite uses WAL and contains a rebuildable index, not consensus-authoritative state.</p>
+<h2 id="5-peer-protocol-cap-n-proto-rpc">5. Peer protocol: Cap&#39;n Proto RPC</h2><p>Both transports expose the same <code>Peer</code> capability and typed methods:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Ordinal</th>
+<th>Method</th>
+<th>Input / result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0</td>
+<td>status</td>
+<td>protocol version, chain ID, head height/hash, earliest height</td>
+</tr>
+<tr>
+<td>1</td>
+<td>submitTransaction</td>
+<td>raw RLP Data → hash</td>
+</tr>
+<tr>
+<td>2</td>
+<td>getBlock</td>
+<td>height → found + typed block</td>
+</tr>
+<tr>
+<td>3</td>
+<td>getBlocks</td>
+<td>start/limit → typed blocks</td>
+</tr>
+<tr>
+<td>4</td>
+<td>getEncodedBlocks</td>
+<td>start/limit → canonical storage block Data list</td>
+</tr>
+<tr>
+<td>5</td>
+<td>submitTransactions</td>
+<td>List(Data) → ordered List(hash or error)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>account</td>
+<td>20-byte address → nonce and balance Data</td>
+</tr>
+<tr>
+<td>7</td>
+<td>committedTransaction</td>
+<td>32-byte hash → found/height/blockHash/success</td>
+</tr>
+<tr>
+<td>8</td>
+<td>verification</td>
+<td>process/runtime and CPU/GPU counters</td>
+</tr>
+</tbody></table></div>
+<p><code>getEncodedBlocks</code> is the replication path carrying full canonical records including
+receipts. Older typed Block views are not interchangeable with storage Block bytes.
+Bulk submissions permit 1–4,096 entries, at most 128 KiB per transaction and 2 MiB
+aggregate raw payload. Block retrieval caps requested count at 64 and applies the
+server&#39;s response byte budget. Admission is bounded (two queued jobs plus one active
+job). Wire/schema compatibility and consensus commitment compatibility are distinct.</p>
+<h3 id="tcp-default">TCP (default)</h3><p>Capnp two-party RPC over a reliable TCP stream. The direct TCP endpoint is restricted
+to loopback and is unencrypted. Do not expose it as a public authenticated endpoint.
+Persistent sessions have no fixed wall-clock expiry. TCP is the default because it
+was faster in the documented local measurements; that is not a WAN guarantee.</p>
+<h3 id="http-3-optional">HTTP/3 (optional)</h3><p>A full-duplex HTTP/3 <code>POST /sfc/rpc</code>, with <code>Content-Type: application/x-capnp</code>, tunnels
+the same Capnp RPC byte stream in request/response DATA. QUIC/TLS provides transport
+security; clients pin the configured peer certificate and server name. HTTP/3 is
+not a JSON RPC protocol and does not define a different transaction encoding.</p>
+<p>Connections are bounded, handshakes have a deadline, and QUIC idle timeouts apply.
+Active RPC sessions are long-lived. Configure advertised endpoints and certificate
+trust explicitly; discover actual test endpoints in startup output.</p>
+<h2 id="6-ethereum-compatible-http-rpc">6. Ethereum-compatible HTTP RPC</h2><p>HTTP <code>POST /</code> accepts JSON-RPC 2.0, individual requests, notifications and batches
+of 1–4,096 requests. HTTP body limit: 5 MiB. This is a compatibility adapter, separate
+from the high-throughput binary peer API.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Implemented methods</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Identity</td>
+<td>web3_clientVersion, web3_sha3, net_version, net_listening, net_peerCount</td>
+</tr>
+<tr>
+<td>Chain</td>
+<td>eth_chainId, eth_blockNumber, eth_syncing, eth_accounts</td>
+</tr>
+<tr>
+<td>Fees</td>
+<td>eth_gasPrice, eth_maxPriorityFeePerGas</td>
+</tr>
+<tr>
+<td>State</td>
+<td>eth_getBalance, eth_getTransactionCount, eth_getCode, eth_getStorageAt</td>
+</tr>
+<tr>
+<td>Transactions</td>
+<td>eth_sendRawTransaction, eth_getTransactionReceipt</td>
+</tr>
+<tr>
+<td>Blocks</td>
+<td>eth_getBlockByNumber (transaction hashes only; second argument false)</td>
+</tr>
+<tr>
+<td>Simulation</td>
+<td>eth_call, eth_estimateGas</td>
+</tr>
+<tr>
+<td>SFC extension</td>
+<td>sfc_verificationStatus</td>
+</tr>
+</tbody></table></div>
+<p>State queries accept latest state only. Block queries support latest, earliest and
+hex height; pruned/missing blocks and receipts return null. Pending/safe/finalized
+tags are not supported. Peer count and syncing responses are development values,
+not BFT connectivity/finality telemetry. eth_accounts is empty: clients hold keys.</p>
+<p>REVM executes Shanghai bytecode; compile Solidity with <code>evmVersion: &quot;shanghai&quot;</code>.
+Contract creation, calls, storage, logs, reverts and ERC-20 operations are tested.
+Fees use zero base fee and a zero-address beneficiary, not Ethereum&#39;s dynamic fee
+market. Unsupported: type-1/blob/authorization-list transactions, eth_getLogs,
+eth_getTransactionByHash, filters/subscriptions, tracing, full block transaction
+objects, historical account state and Ethereum MPT proofs. Unknown methods return
+method-not-found. Cronos-level tooling compatibility is a goal, not a completed
+conformance claim. See <a href="ETHEREUM.html">compatibility details</a>.</p>
+<h2 id="7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</h2><p><code>make stresstest</code>: release build, one sequencer, native MLX GPU, SQLite ON, Capnp TCP,
+12 Rayon workers, 4,096-entry batches, one in-flight batch, 10 ms block scheduling,
+1,048,576 transactions per round. Runs until <code>make stop</code> or Ctrl-C. Startup prints
+URLs and persistence paths. Home: <code>.sfc-stress-merkle-v1</code>; old homes are preserved.</p>
+<p>TPS counts committed transfers and includes signature verification, EVM execution,
+Merkle updates and durable commits. Fixture signing is outside the timed interval.
+Node CPU uses 100% per core and excludes the load generator. SQLite catches up
+asynchronously and is checked after timing. These local transfer tests are neither
+order-book benchmarks nor sustained multi-validator consensus throughput.</p>
+<h2 id="8-remaining-optimization-targets-not-implemented">8. Remaining optimization targets (not implemented)</h2><p>See <a href="BYTE-PIPELINE-BENCHMARK.html">byte-pipeline measurements</a> for the current changes:
+allocation/copy reductions are implemented, but a stable TPS improvement is not established.</p>
+<ol>
+<li>EVM state conversion: <code>ethereum::load_db</code> reconstructs the numeric account/storage
+database and <code>save_db</code> reconstructs World accounts. Track dirty accounts/slots and
+reuse unchanged canonical records instead of repeatedly parsing/stringifying them.</li>
+<li>Storage commitments: separate each contract&#39;s storage trie from its account leaf;
+update only written slots and the account&#39;s storageRoot. This changes commitment
+rules and needs an explicit compatibility plan, deterministic vectors and replay tests.</li>
+<li>GPU input ownership: eliminate the staging-to-MLX copy only with a documented,
+GPU-compatible allocation and correct ownership through lazy/asynchronous execution.
+Never pass a temporary Rust pointer whose storage may be reused before GPU completion.</li>
+<li>Block construction/import: production constructs canonical bytes; followers currently
+reconstruct execution records for comparison. Investigate streaming comparison of
+expected fields without losing receipt, ordering or canonical-byte validation.</li>
+<li>Evaluate large state and contracts: small-account transfer TPS does not expose the
+cost of large storage maps, touched-slot distributions or state snapshot copying.
+Compare paired runs, CPU usage, allocations/live memory and commit latency as well as TPS.</li>
+</ol>
+<h2 id="9-execution-path-allocation-improvements">9. Execution-path allocation improvements</h2><p>See <a href="EXECUTION-ALLOCATION-BENCHMARK.html">alternating before/after measurements</a>.</p>
+<p>The EVM change set is applied in deterministic address order using a sorted contiguous
+vector instead of temporary B-tree nodes. Stable sorting and duplicate-key handling
+preserve the previous last-entry-wins behavior; storage slots are sorted before apply.
+RocksDB transaction keys retain their exact <code>tx/</code> plus 64 lowercase hex-byte format,
+but are now constructed in a 67-byte stack buffer rather than two heap strings.</p>
+<p>Single-transaction Capnp RPC now reserves the same ordered admission queue as bulk
+RPC and runs verification on a blocking worker. It no longer performs GPU work while
+holding the node lock on the RPC executor. Mixed single/bulk requests preserve their
+arrival order within the same Peer capability; this is not a global cross-client
+ordering guarantee.</p>
+<p>Rust-generated benchmark transactions stay as Bytes through request construction;
+there is no raw-bytes → hex-text → raw-bytes round trip. Historical hex fixture files
+remain loadable and are decoded once at load time. This reduces load-generator work,
+which is outside the reported node CPU/timed signing interval.</p>
+</article><footer>Super Frontier Chain · Generated from SPECIFICATION.md · Rebuild: npm run build:docs<br>Static, offline-readable documentation. No external scripts, fonts or trackers.</footer></main></body></html>

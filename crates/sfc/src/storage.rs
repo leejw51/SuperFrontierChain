@@ -363,10 +363,12 @@ impl Store {
             .get_root::<crate::storage_capnp::block::Reader>()?
             .get_receipts()?
         {
-            batch.put(
-                format!("tx/{}", hex::encode(receipt.get_transaction_hash()?)),
-                &encoded_height,
-            );
+            // The persisted key format is unchanged. Avoid two heap strings
+            // per receipt when constructing the fixed-width hexadecimal key.
+            let mut key = [0u8; 67];
+            key[..3].copy_from_slice(b"tx/");
+            hex::encode_to_slice(receipt.get_transaction_hash()?, &mut key[3..])?;
+            batch.put(key, &encoded_height);
         }
         self.write(batch)?;
         *cached = Some(next_head);

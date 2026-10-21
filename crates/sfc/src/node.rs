@@ -105,7 +105,9 @@ impl Node {
         );
         let context = self.context(self.head.height() + 1, self.head.timestamp());
         let mut executor = ethereum::Executor::new(&mut self.pending_db, context);
-        Ok(decoded
+        let batch_len = decoded.len();
+        let pending_start = self.pending.len();
+        let results = decoded
             .into_iter()
             .map(|tx| {
                 tx.and_then(|tx| {
@@ -119,7 +121,15 @@ impl Node {
                     )
                 })
             })
-            .collect())
+            .collect();
+        // Partial batches must not pin a whole RPC slab for a tiny surviving
+        // transaction. Full batches retain their shared, contiguous ownership.
+        if self.pending.len() - pending_start != batch_len {
+            for tx in self.pending.iter_mut().skip(pending_start) {
+                tx.raw = bytes::Bytes::copy_from_slice(&tx.raw);
+            }
+        }
+        Ok(results)
     }
 
     pub fn pending_len(&self) -> usize {
@@ -158,8 +168,14 @@ impl Node {
         self.pending_db = pending_db(&self.world, &self.head, self.store.head_hash()?)?;
         let context = self.context(block.height() + 1, block.timestamp());
         let mut executor = ethereum::Executor::new(&mut self.pending_db, context);
+        let before_revalidation = self.pending.len();
         self.pending
             .retain(|tx| executor.execute(tx.env.clone(), true).is_ok());
+        if self.pending.len() != before_revalidation {
+            for tx in &mut self.pending {
+                tx.raw = bytes::Bytes::copy_from_slice(&tx.raw);
+            }
+        }
         self.pending_hashes = self.pending.iter().map(|tx| tx.hash).collect();
         self.pending_bytes = self.pending.iter().map(|tx| tx.raw.len()).sum();
         self.store.maintain()?;

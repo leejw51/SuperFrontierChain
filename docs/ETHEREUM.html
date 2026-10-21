@@ -1,0 +1,46 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Super Frontier Chain — architecture, protocol and measured performance."><title>Ethereum compatibility · SFC</title><style>
+:root{color-scheme:dark;--bg:#080e19;--panel:#111b2a;--line:#243447;--ink:#eaf2fa;--muted:#a5b5c7;--mint:#8af0c3}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--mint);text-underline-offset:4px}a:hover{color:white}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}aside{position:fixed;inset:0 auto 0 0;width:270px;padding:30px 24px;border-right:1px solid var(--line);overflow:auto;background:#0b1320}aside img{width:220px;display:block;margin:0 0 22px}aside .caption,.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;font-weight:700;color:var(--mint)}nav a{display:block;text-decoration:none;color:var(--muted);font-size:13px;line-height:1.5;padding:9px 0}nav a.sub{padding-left:14px;font-size:12px}nav a:hover{color:var(--mint)}main{max-width:1220px;margin-left:270px;padding:60px clamp(24px,5vw,84px) 100px}header{border-bottom:1px solid var(--line);padding-bottom:36px;margin-bottom:40px}header .logo{width:min(560px,100%);display:block;margin-bottom:24px}.actions{display:flex;gap:12px;flex-wrap:wrap}.actions a{font-size:12px;border:1px solid var(--line);padding:6px 13px;border-radius:8px;text-decoration:none}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.04em;line-height:1.15;margin:12px 0 24px}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em;margin-top:58px;padding-top:12px}h3{font-size:19px;margin-top:30px}p,li{color:var(--muted)}strong{color:var(--ink)}li{padding:3px 0}code{font: .86em ui-monospace,SFMono-Regular,Consolas,monospace;background:#172335;border:1px solid #223349;border-radius:5px;padding:2px 5px;overflow-wrap:anywhere}pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;overflow:auto;line-height:1.55}pre code{background:none;border:0;padding:0;overflow-wrap:normal}.table-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:24px 0}table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.6}th{text-align:left;background:#192738;color:var(--mint)}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}td{color:var(--muted)}tr:last-child td{border-bottom:0}tr:hover td{background:#132033}.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:9px}.edge{display:grid;grid-template-columns:1fr .9fr 1fr;align-items:center;gap:12px;font-size:12px;line-height:1.5}.node{padding:10px 12px;border:1px solid #30465a;border-radius:8px;color:var(--ink);background:#0e1927}.arrow{text-align:center;color:var(--mint);font-size:11px}.arrow b{display:block;font-size:20px;line-height:1.2}details{margin-top:16px}summary{color:var(--mint);font-size:12px;cursor:pointer}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--muted)}.skip{position:absolute;top:-90px}.skip:focus{top:10px;left:290px;background:var(--panel);padding:10px;z-index:10}@media(max-width:900px){aside{position:static;width:auto;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}aside img{width:165px;margin:0}aside nav,aside .caption{display:none}main{margin:0;padding:30px 22px 60px}h2{margin-top:38px}.edge{grid-template-columns:1fr 70px 1fr;gap:6px}.flow{padding:12px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{aside,.actions,.skip{display:none}main{margin:0;padding:0;max-width:none}body{background:white;color:#111}p,li,td,footer{color:#333}h1,h2,h3,strong{color:#111}a{color:#175d49}pre,.flow,.node,th{background:#f4f7f8;color:#111}.table-scroll,pre,.flow{break-inside:avoid}header .logo{width:300px}}</style></head><body><a class="skip" href="#content">Skip to content</a><aside><a href="SPECIFICATION.html"><img src="assets/sfc-logo.png" alt="SFC — Super Frontier Chain"></a><p class="caption">On this page</p><nav aria-label="Table of contents"></nav></aside><main id="content"><header><img class="logo" src="assets/sfc-logo.png" alt="Super Frontier Chain"><div class="eyebrow">Engineering documentation / SFC</div><p>Architecture. Execution. Evidence.</p><div class="actions"><a href="ETHEREUM.md">Markdown source ↗</a><a href="SPECIFICATION.html">Specification</a><a href="EXECUTION-ALLOCATION-BENCHMARK.html">Benchmarks</a><a href="ETHEREUM.html">Ethereum compatibility</a></div></header><article><h1 id="ethereum-compatibility">Ethereum compatibility</h1><p>The runtime executes real Shanghai EVM bytecode using REVM. It supports native-value
+transfers, contract creation/calls, persistent contract storage, gas accounting,
+reverts, receipt logs and contract addresses. Both protected legacy transactions and
+EIP-1559 type-2 transactions (including access lists) recover the sender, enforce
+chain ID, reject high-s signatures, and validate nonce, gas and balance.</p>
+<p>Implemented RPC methods:</p>
+<ul>
+<li><code>web3_clientVersion</code>, <code>web3_sha3</code></li>
+<li><code>net_version</code>, <code>net_listening</code>, <code>net_peerCount</code></li>
+<li><code>eth_chainId</code>, <code>eth_blockNumber</code>, <code>eth_syncing</code>, <code>eth_accounts</code></li>
+<li><code>eth_gasPrice</code>, <code>eth_maxPriorityFeePerGas</code></li>
+<li><code>eth_getBalance</code>, <code>eth_getTransactionCount</code>, <code>eth_getCode</code>, <code>eth_getStorageAt</code></li>
+<li><code>eth_sendRawTransaction</code>, <code>eth_getTransactionReceipt</code></li>
+<li><code>eth_getBlockByNumber</code> with transaction hashes (<code>false</code>)</li>
+<li><code>eth_call</code>, <code>eth_estimateGas</code></li>
+</ul>
+<p>State queries accept <code>latest</code> only. Unsupported tags fail explicitly. Block queries
+accept <code>latest</code>, <code>earliest</code>, or a hexadecimal height; a missing/pruned block returns
+null. Pruned receipts return null. Unknown methods return JSON-RPC method-not-found.
+HTTP batches of up to 4,096 requests and notifications are supported. Transaction
+signatures use the configured CPU/GPU/HYBRID verifier (GPU by default); requests
+are then applied in input order. <code>sfc_verificationStatus</code> reports the active backend,
+process IDs and CPU/GPU recovery record counts.
+Invalid entries do not discard valid neighbors, and notifications still execute
+without a response. JSON-RPC is HTTP for wallet/tooling
+compatibility; node-to-node transport defaults to Cap&#39;n Proto RPC over TCP,
+with HTTP/3 available as an alternative transport for the same RPC protocol.</p>
+<p>Fees use a fixed zero base fee and the zero-address fee beneficiary. This is not a
+full dynamic EIP-1559 base-fee market. Blob, type-1 and authorization-list transactions
+are unsupported. No standard Ethereum state/receipt trie proofs, historical account
+state, filters, subscriptions, trace methods, full transaction/block objects or
+<code>eth_getLogs</code> yet. Block JSON is a limited representation rather than a complete
+Ethereum header. Wallets that rely on unsupported methods need further compatibility
+work. <code>eth_accounts</code> is empty because keys remain with clients.</p>
+<p><code>eth_call</code> and <code>eth_estimateGas</code> allow a contract address as <code>from</code>, preserving
+CALLER and discarding simulated changes. EIP-3607 remains enforced for actual
+transactions; only RPC simulations disable that check.</p>
+<p>Compile Solidity with <code>evmVersion: &quot;shanghai&quot;</code>. <code>make erc20</code> uses a pinned compiler and
+ethers to test a real ERC-20 contract: deployment, balance/supply, transfer, approval,
+transferFrom, indexed events, revert, replay rejection, persistence and follower sync.
+This evidence establishes the tested subset; it is not an Ethereum conformance suite.</p>
+<p>Dependencies and APIs: <a href="https://github.com/bluealloy/revm">REVM</a>,
+<a href="https://github.com/capnproto/capnproto-rust">Cap&#39;n Proto Rust</a>,
+<a href="https://github.com/hyperium/h3">HTTP/3 implementation</a>.</p>
+</article><footer>Super Frontier Chain · Generated from ETHEREUM.md · Rebuild: npm run build:docs<br>Static, offline-readable documentation. No external scripts, fonts or trackers.</footer></main></body></html>

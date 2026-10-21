@@ -179,3 +179,25 @@ fn block_context_has_stable_commitments_after_pruning_and_restart() {
         "0x39bf9d9cbb86bd38c5b8accf06c150be60ae73d3e165e3525a04478b73c3d4ce"
     );
 }
+
+#[test]
+fn duplicate_apply_keys_preserve_last_entry_wins() {
+    use revm::primitives::{Account, AccountInfo, EvmStorageSlot};
+    let address = Address::repeat_byte(0x44);
+    let mut db = OrderedDb::default();
+    db.insert_account_info(address, AccountInfo::default());
+    db.insert_account_storage(address, U256::from(1), U256::from(5))
+        .unwrap();
+    let mut earlier = Account::default();
+    earlier.mark_touch();
+    earlier.mark_selfdestruct();
+    let mut later = Account::default();
+    later.mark_touch();
+    later.storage.insert(
+        U256::from(2),
+        EvmStorageSlot::new_changed(U256::ZERO, U256::from(9)),
+    );
+    db.apply([(address, earlier), (address, later)]);
+    assert_eq!(db.storage(address, U256::from(1)).unwrap(), U256::from(5));
+    assert_eq!(db.storage(address, U256::from(2)).unwrap(), U256::from(9));
+}

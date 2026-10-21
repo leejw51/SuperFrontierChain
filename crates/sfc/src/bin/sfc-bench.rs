@@ -434,7 +434,7 @@ fn balance(node: &Node, address: &str) -> Result<U256> {
     .map_err(anyhow::Error::msg)
 }
 struct Fixture {
-    raw: Vec<String>,
+    raw: Vec<bytes::Bytes>,
     hashes: Vec<String>,
     owner: String,
     recipient: String,
@@ -525,10 +525,8 @@ impl Fixture {
                 } else {
                     signed(nonce, Some(&recipient), (i - warm + 1) as u64, &[])
                 };
-                Ok((
-                    format!("0x{}", hex::encode(&raw)),
-                    format!("0x{}", hex::encode(hash(&raw))),
-                ))
+                let digest = format!("0x{}", hex::encode(hash(&raw)));
+                Ok((bytes::Bytes::from(raw), digest))
             })
             .collect();
         let (raw, hashes) = records?.into_iter().unzip();
@@ -550,7 +548,10 @@ impl Fixture {
                 .collect()
         };
         let result = Self {
-            raw: strings("raw")?,
+            raw: strings("raw")?
+                .into_iter()
+                .map(|raw| hex::decode(raw.trim_start_matches("0x")).map(bytes::Bytes::from))
+                .collect::<std::result::Result<Vec<_>, _>>()?,
             hashes: strings("hashes")?,
             owner: value["owner"].as_str().context("owner")?.into(),
             recipient: value["recipient"].as_str().context("recipient")?.into(),
@@ -561,10 +562,7 @@ impl Fixture {
         );
         for (raw, expected) in result.raw.iter().zip(&result.hashes) {
             ensure!(
-                format!(
-                    "0x{}",
-                    hex::encode(hash(&hex::decode(raw.trim_start_matches("0x"))?))
-                ) == *expected,
+                format!("0x{}", hex::encode(hash(raw))) == *expected,
                 "fixture hash mismatch"
             );
         }
@@ -589,14 +587,7 @@ fn cpu_seconds(system: &mut System, pids: &[Pid]) -> Result<Vec<f64>> {
 }
 /// Prepare immutable transaction bytes in parallel before the measurement.
 fn request_body(indices: &[usize], fixture: &Fixture) -> Result<Vec<bytes::Bytes>> {
-    indices
-        .par_iter()
-        .map(|i| {
-            Ok(bytes::Bytes::from(hex::decode(
-                fixture.raw[*i].trim_start_matches("0x"),
-            )?))
-        })
-        .collect()
+    Ok(indices.iter().map(|i| fixture.raw[*i].clone()).collect())
 }
 fn measure(
     network: &mut Network,
@@ -1049,8 +1040,7 @@ mod tests {
             "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
         );
         for (i, raw) in fixture.raw.iter().enumerate() {
-            let raw = hex::decode(raw.trim_start_matches("0x")).unwrap();
-            let transaction = sfc::ethereum::Transaction::decode(&raw, 7777).unwrap();
+            let transaction = sfc::ethereum::Transaction::decode(raw, 7777).unwrap();
             assert_eq!(transaction.env.nonce, Some(i as u64));
             assert_eq!(raw[0] == 2, i % 2 == 1);
             assert_eq!(
@@ -1065,11 +1055,7 @@ mod tests {
         }
         let resumed = Fixture::generate(33, 100, false).unwrap();
         for (i, raw) in resumed.raw.iter().enumerate() {
-            let transaction = sfc::ethereum::Transaction::decode(
-                &hex::decode(raw.trim_start_matches("0x")).unwrap(),
-                7777,
-            )
-            .unwrap();
+            let transaction = sfc::ethereum::Transaction::decode(raw, 7777).unwrap();
             assert_eq!(transaction.env.nonce, Some(100 + i as u64));
             assert_eq!(transaction.env.value, U256::from(i + 1));
         }

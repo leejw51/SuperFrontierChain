@@ -26,7 +26,8 @@ are then applied in input order. `sfc_verificationStatus` reports the active bac
 process IDs and CPU/GPU recovery record counts.
 Invalid entries do not discard valid neighbors, and notifications still execute
 without a response. JSON-RPC is HTTP for wallet/tooling
-compatibility; only node-to-node transport defaults to HTTP/3.
+compatibility; node-to-node transport defaults to Cap'n Proto RPC over TCP,
+with HTTP/3 available as an alternative transport for the same RPC protocol.
 
 Fees use a fixed zero base fee and the zero-address fee beneficiary. This is not a
 full dynamic EIP-1559 base-fee market. Blob, type-1 and authorization-list transactions

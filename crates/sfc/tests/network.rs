@@ -147,15 +147,15 @@ async fn binary_batch_preserves_order_errors_and_limits_on_both_transports() {
             for (i, tx) in prefix.iter().enumerate() { list.set(i as u32, &tx.raw); }
             let first_promise = first_request.send().promise;
             let last = common::transfer(66);
-            let mut next_request = client.client.submit_transactions_request();
-            next_request.get().init_transactions(1).set(0, &last.raw);
+            let mut next_request = client.client.submit_transaction_request();
+            next_request.get().set_raw(&last.raw);
             let next_promise = next_request.send().promise;
             let (first_result, next_result) = futures::join!(first_promise, next_promise);
             let first_result = first_result.unwrap();
             for (result, tx) in first_result.get().unwrap().get_results().unwrap().iter().zip(&prefix) {
                 assert!(matches!(result.which().unwrap(), Which::Hash(h) if *h.as_ref().unwrap()==tx.hash));
             }
-            assert!(matches!(next_result.unwrap().get().unwrap().get_results().unwrap().get(0).which().unwrap(), Which::Hash(h) if *h.as_ref().unwrap()==last.hash));
+            assert_eq!(next_result.unwrap().get().unwrap().get_hash().unwrap(), last.hash);
             assert_eq!(node.lock().unwrap().pending_count(), 65);
             node.lock().unwrap().produce(1_000_002).unwrap();
             node.lock().unwrap().config.sync_peer = Some(SyncPeer {transport,address,certificate:config.tls_cert,server_name:"localhost".into()});

@@ -8,7 +8,9 @@ help:
 	@echo 'SFC commands:'
 	@echo '  make              Show this help'
 	@echo '  make start        Build release and start a background node (auto-init new home)'
-	@echo '  make stop         Stop the continuous stress test and managed background node'
+	@echo '  make stop         Stop all blockchain processes belonging to this repository'
+	@echo '  make clearall     Stop nodes and delete repository .sfc* chain homes (including archives)'
+	@echo '  make stressstart  Python-supervised background release/GPU stress test'
 	@echo '  make run          Run release node in foreground'
 	@echo '  make testnet      Run a Python-supervised multi-node network in foreground'
 	@echo '  make check        Run lint and Rust tests'
@@ -18,7 +20,7 @@ help:
 	@echo '  make benchmark    Rust-only release TPS/CPU benchmark; SQLite ON/OFF'
 	@echo '  make bench-network  Measure binary admission through two-node durable replay'
 	@echo '  make bench-transports  Compare TCP and HTTP/3 with alternating trial order'
-	@echo '  make stresstest   Continuous persistent release/GPU test; stop with make stop'
+	@echo '  make stresstest   Continuous release/GPU test; Ctrl-C / Ctrl-Z / make stop'
 	@echo '  make bench-backends  Compare CPU, native MLX GPU, HYBRID using Rust'
 	@echo '  make test-mlx     Run GPU arithmetic/recovery differential checks only'
 	@echo '  Other: doctor fetch build release schema fmt lint test init archive dev run-log'
@@ -61,6 +63,20 @@ bench:
 	$(CARGO) bench --locked -p sfc --bench execution
 clean:
 	$(CARGO) clean
+
+# Preserve supervisor locks: deleting them could let concurrent starts bypass locking.
+# Only repository-local chain homes are removed; symlinks are never followed.
+.PHONY: clearall
+clearall: stop
+	@set -eu; \
+	for dir in "$(CURDIR)"/.sfc*; do \
+		[ -d "$$dir" ] || continue; \
+		[ ! -L "$$dir" ] || continue; \
+		[ "$$dir" != "$(CURDIR)/.sfc-processes" ] || continue; \
+		printf 'Removing chain data: %s\n' "$$dir"; \
+		rm -rf -- "$$dir"; \
+	done; \
+	printf 'Repository chain data cleared. Custom homes outside .sfc* are unchanged.\n'
 
 .PHONY: erc20 integration
 # JavaScript is test tooling only; node and execution runtime are Rust.
@@ -137,8 +153,8 @@ run-log: release
 .PHONY: start stop
 start: release codec-setup
 	$(PYTHON) scripts/service.py start --home '$(DATA_DIR)' --config '$(CONFIG)'
-stop: target/release/sfc-bench
-	./target/release/sfc-bench stop --home '$(STRESS_DIR)' --service-home '$(DATA_DIR)'
+stop:
+	python3 scripts/stress_supervisor.py stop
 target/release/sfc-bench:
 	$(CARGO) build --locked --release -p sfc --bin sfc-bench
 
@@ -173,14 +189,22 @@ STRESS_BATCH ?= 4096
 STRESS_INTERVAL ?= 10
 STRESS_THREADS ?= 12
 STRESS_SQLITE ?= on
+STRESS_BIND ?= 0.0.0.0
 STRESS_DIR ?= .sfc-stress-merkle-v1
 STRESS_REPORT ?= $(STRESS_DIR)/results.capnp
-.PHONY: stresstest
-stresstest: release
-	RAYON_NUM_THREADS='$(STRESS_THREADS)' ./target/release/sfc-bench run --binary '$(CURDIR)/target/release/sfc' \
-		--nodes 1 --backend gpu --home '$(STRESS_DIR)' --transactions '$(STRESS_TRANSACTIONS)' \
+.PHONY: stresstest stressstart
+STRESS_COMMAND = '$(CURDIR)/target/release/sfc-bench' run --binary '$(CURDIR)/target/release/sfc' \
+		--rpc-bind '$(STRESS_BIND)' --nodes 1 --backend gpu --home '$(STRESS_DIR)' --transactions '$(STRESS_TRANSACTIONS)' \
 		--rpc-batch '$(STRESS_BATCH)' --interval '$(STRESS_INTERVAL)' \
 		--output '$(STRESS_REPORT)' --sqlite '$(STRESS_SQLITE)' --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)'
+stresstest:
+	RAYON_NUM_THREADS='$(STRESS_THREADS)' python3 scripts/stress_supervisor.py run -- $(STRESS_COMMAND)
+stressstart:
+	RAYON_NUM_THREADS='$(STRESS_THREADS)' python3 scripts/stress_supervisor.py start -- $(STRESS_COMMAND)
+
+.PHONY: test-stress-supervisor
+test-stress-supervisor:
+	python3 scripts/test_stress_supervisor.py
 
 .PHONY: test-stresstest
 test-stresstest: release
@@ -254,3 +278,7 @@ bench-transports: release
 				--transport $transport --sync-transport $transport --inflight '$(BENCH_INFLIGHT)' --output '$(TRANSPORT_REPORT)' || exit $$?; \
 		done; i=$$((i + 1)); \
 	done
+
+.PHONY: test-stress-signals
+test-stress-signals:
+	python3 scripts/test_stress_signals.py

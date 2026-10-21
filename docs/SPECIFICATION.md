@@ -178,6 +178,16 @@ conformance claim. See [compatibility details](ETHEREUM.md).
 1,048,576 transactions per round. Runs until `make stop` or Ctrl-C. Startup prints
 URLs and persistence paths. Home: `.sfc-stress-merkle-v1`; old homes are preserved.
 
+Python supervises the build and Rust runner lifecycle; no benchmark computation or
+GPU execution runs in Python. `make stressstart` starts the same workload in the
+background. Supervisor output is appended to `.sfc-processes/stress.log`. Duplicate
+starts return successfully without starting another runner. `make stop` discovers
+this repository's current-user blockchain processes and supervisors, terminates
+their descendants, waits for exit and escalates to SIGKILL after a grace period.
+Custom data homes are discovered through process identity, not guessed PID files.
+State directories are retained. Test with `make test-stress-supervisor` when no
+other repository blockchain processes are running.
+
 TPS counts committed transfers and includes signature verification, EVM execution,
 Merkle updates and durable commits. Fixture signing is outside the timed interval.
 Node CPU uses 100% per core and excludes the load generator. SQLite catches up
@@ -225,3 +235,13 @@ Rust-generated benchmark transactions stay as Bytes through request construction
 there is no raw-bytes → hex-text → raw-bytes round trip. Historical hex fixture files
 remain loadable and are decoded once at load time. This reduces load-generator work,
 which is outside the reported node CPU/timed signing interval.
+
+### Remote stress dashboard
+
+The Python-supervised stress targets default to `STRESS_BIND=0.0.0.0`.
+This exposes the shared dashboard and Ethereum HTTP RPC listener on IPv4
+interfaces; internal benchmark requests still use loopback. Startup reports
+local and network dashboard URLs, including the Tailscale IPv4 URL when
+available. An iPad must share the LAN or have permitted access through Tailscale.
+Set `STRESS_BIND=127.0.0.1` to restrict HTTP access to this machine.
+Direct benchmark runs retain a loopback default unless `--rpc-bind` is supplied.

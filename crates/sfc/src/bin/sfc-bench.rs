@@ -15,8 +15,8 @@ use sfc::{
 };
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
-    net::{TcpListener, UdpSocket},
+    io::{Read, Seek, SeekFrom, Write},
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, UdpSocket},
     os::{
         fd::AsRawFd,
         unix::net::{UnixListener, UnixStream},
@@ -63,6 +63,9 @@ enum Sqlite {
 }
 #[derive(Clone, Args)]
 struct Options {
+    /// HTTP dashboard and Ethereum RPC bind address.
+    #[arg(long, default_value = "127.0.0.1")]
+    rpc_bind: IpAddr,
     #[arg(long)]
     binary: Option<PathBuf>,
     #[arg(long, default_value = ".sfc-stress-merkle-v1")]
@@ -209,6 +212,8 @@ struct Node {
     peer: Option<bench_support::Client>,
     config: Config,
     url: String,
+    log_path: PathBuf,
+    log_start: u64,
 }
 struct Network {
     transport: Transport,
@@ -281,6 +286,7 @@ impl Network {
                     peer.certificate = node_home.join(&peer.certificate);
                 }
             }
+            config.rpc_listen.set_ip(options.rpc_bind);
             config.block_interval_ms = options.interval;
             config.verification.backend = options.backend;
             config.verification.gpu_runtime = options.gpu_runtime;
@@ -292,6 +298,7 @@ impl Network {
                 .create(true)
                 .append(true)
                 .open(node_home.join("node.log"))?;
+            let log_start = log.metadata()?.len();
             let mut command = Command::new(binary);
             command
                 .arg("run")
@@ -313,7 +320,9 @@ impl Network {
             network.nodes.push(Node {
                 child,
                 peer: None,
-                url: format!("http://{}", config.rpc_listen),
+                log_path: node_home.join("node.log"),
+                log_start,
+                url: format!("http://{}", client_address(config.rpc_listen)),
                 config,
             });
         }
@@ -364,10 +373,25 @@ impl Network {
     fn alive(&mut self) -> Result<()> {
         ensure!(!STOP.load(Ordering::Relaxed), "stopped");
         for node in &mut self.nodes {
-            ensure!(
-                node.child.try_wait()?.is_none(),
-                "node exited; measurement invalid"
-            );
+            if let Some(status) = node.child.try_wait()? {
+                let tail = (|| -> std::io::Result<String> {
+                    let mut file = File::open(&node.log_path)?;
+                    let start = file
+                        .metadata()?
+                        .len()
+                        .saturating_sub(4096)
+                        .max(node.log_start);
+                    file.seek(SeekFrom::Start(start))?;
+                    let mut bytes = Vec::new();
+                    file.take(4096).read_to_end(&mut bytes)?;
+                    Ok(String::from_utf8_lossy(&bytes).into_owned())
+                })()
+                .unwrap_or_else(|error| format!("Cannot read log: {error}"));
+                bail!(
+                    "node exited ({status}); measurement invalid\nLog: {}\n{tail}",
+                    node.log_path.display()
+                );
+            }
         }
         Ok(())
     }
@@ -826,6 +850,74 @@ fn report(path: &Path, value: &Value) -> Result<()> {
     );
     Ok(())
 }
+fn check_stress_space(path: &Path, transactions: usize) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes())?;
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: name is NUL terminated and stats points to writable statvfs storage.
+    if unsafe { libc::statvfs(name.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error()).context("checking stress disk space");
+    }
+    // SAFETY: successful statvfs initialized the structure.
+    let stats = unsafe { stats.assume_init() };
+    let available = (stats.f_bavail as u64).saturating_mul(stats.f_frsize as u64);
+    // Reserve space for RocksDB compaction plus conservative per-round history/index growth.
+    // This is an early-stop estimate, not a guarantee against other writers filling the disk.
+    let required = 2 * 1024_u64.pow(3) + (transactions as u64).saturating_mul(4096);
+    ensure!(
+        available >= required,
+        "insufficient disk space for stress test at {}: {:.2} GiB available, {:.2} GiB required. \
+         Free space or select STRESS_DIR on a larger volume. Existing chain data is preserved.",
+        path.display(),
+        available as f64 / 1024_f64.powi(3),
+        required as f64 / 1024_f64.powi(3)
+    );
+    Ok(())
+}
+
+fn client_address(mut address: SocketAddr) -> SocketAddr {
+    if address.ip().is_unspecified() {
+        address.set_ip(if address.is_ipv4() {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        } else {
+            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)
+        });
+    }
+    address
+}
+
+/// Enumerate active IPv4 interfaces without sending packets or depending on CLI tools.
+fn interface_addresses() -> Vec<Ipv4Addr> {
+    let mut head = std::ptr::null_mut();
+    let mut addresses = Vec::new();
+    // SAFETY: getifaddrs initializes head; each address is checked before casting.
+    // The list remains live during traversal and is freed exactly once.
+    unsafe {
+        if libc::getifaddrs(&mut head) != 0 {
+            return addresses;
+        }
+        let mut current = head;
+        while !current.is_null() {
+            let entry = &*current;
+            if !entry.ifa_addr.is_null()
+                && entry.ifa_flags & libc::IFF_UP as u32 != 0
+                && (*entry.ifa_addr).sa_family as i32 == libc::AF_INET
+            {
+                let address = &*(entry.ifa_addr as *const libc::sockaddr_in);
+                let ip = Ipv4Addr::from(address.sin_addr.s_addr.to_ne_bytes());
+                if !ip.is_loopback() && !ip.is_unspecified() {
+                    addresses.push(ip);
+                }
+            }
+            current = entry.ifa_next;
+        }
+        libc::freeifaddrs(head);
+    }
+    addresses.sort_unstable();
+    addresses.dedup();
+    addresses
+}
+
 fn print_info(
     network: &Network,
     home: &Path,
@@ -835,7 +927,8 @@ fn print_info(
 ) -> Result<()> {
     let node = &network.nodes[0];
     let data = &node.config.data_dir;
-    let info = json!({
+    let mut info = json!({
+        "HTTP bind (dashboard + Ethereum RPC)": node.config.rpc_listen.to_string(),
         "Load transport":format!("{:?} / typed Capnp batch API",network.transport),
         "Dashboard":format!("{}/dashboard",node.url),"Ethereum RPC":node.url,
         "Sync endpoint (HTTP/3, UDP; typed RPC)":format!("https://{}",node.config.peer_listen),
@@ -852,6 +945,22 @@ fn print_info(
         "Node PID":node.child.id(),"GPU runtime":format!("Rust + {:?}; no Python",node.config.verification.gpu_runtime),
         "Stop command":format!("make stop STRESS_DIR={}",home.display())
     });
+    if node.config.rpc_listen.ip().is_unspecified() && node.config.rpc_listen.is_ipv4() {
+        for ip in interface_addresses() {
+            info[format!("Dashboard (network {ip})")] = json!(format!(
+                "http://{ip}:{}/dashboard",
+                node.config.rpc_listen.port()
+            ));
+        }
+        if let Ok(ip) = std::env::var("SFC_TAILSCALE_IP") {
+            if let Ok(ip) = ip.parse::<Ipv4Addr>() {
+                info["Dashboard (Tailscale / iPad)"] = json!(format!(
+                    "http://{ip}:{}/dashboard",
+                    node.config.rpc_listen.port()
+                ));
+            }
+        }
+    }
     let mut log = OpenOptions::new()
         .create(true)
         .append(true)
@@ -895,6 +1004,7 @@ fn execute(options: Options, continuous: bool) -> Result<()> {
         let Some(_lock) = Lock::acquire(&home.join("stress.lock"))? else {
             bail!("already running: {}; use make stop", home.display());
         };
+        check_stress_space(&home, options.transactions)?;
         let _control = Control::start(&home)?;
         let sqlite = options.sqlite == Sqlite::On;
         let output = options.output.clone().unwrap_or(home.join("results.capnp"));
@@ -917,6 +1027,7 @@ fn execute(options: Options, continuous: bool) -> Result<()> {
         let mut trial = 0usize;
         while !STOP.load(Ordering::Relaxed) && (options.rounds == 0 || trial < options.rounds) {
             network.alive()?;
+            check_stress_space(&network.nodes[0].config.data_dir, options.transactions)?;
             let nonce = number(&query(
                 &network.nodes[0],
                 "nonce",
@@ -1016,6 +1127,22 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wildcard_http_binding_uses_loopback_for_benchmark_clients() {
+        for (bind, expected) in [
+            ("0.0.0.0:8545", "127.0.0.1:8545"),
+            ("[::]:8545", "[::1]:8545"),
+            ("192.168.1.2:8545", "192.168.1.2:8545"),
+        ] {
+            assert_eq!(client_address(bind.parse().unwrap()).to_string(), expected);
+        }
+        let cli = Cli::try_parse_from(["sfc-bench", "run"]).unwrap();
+        let Action::Run(options) = cli.command else {
+            panic!("wrong command")
+        };
+        assert!(options.rpc_bind.is_loopback());
+    }
 
     #[test]
     fn rayon_binary_preparation_preserves_order() {

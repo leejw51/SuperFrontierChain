@@ -226,6 +226,8 @@ See [architecture](docs/ARCHITECTURE.md) and [implementation plan](docs/PLAN.md)
 | `make bench` | Release-mode execution, durable-write and admission measurements |
 | `make benchmark` / `make bench-network` | Rust-supervised one/two-node binary RPC admission and durable replay |
 | `make stresstest` | One release node with GPU verification: committed TPS and CPU usage |
+| `make stressstart` | Start the same stress workload in the background under Python supervision |
+| `make stop` | Stop all blockchain processes belonging to this repository, preserving data |
 | `make test-stresstest` | GPU routing, TPS/CPU accounting, durable transaction counts and crash/restart checks |
 | `make test-benchmark-metrics` | Process CPU time parsing and missing-worker regression checks |
 | `make test-migrations` | Automatic upgrades, data preservation, rollback/retry and signer protection |
@@ -240,10 +242,15 @@ round contains 1,048,576 signed transfers with 4,096 transactions per binary RPC
 host). Override with `STRESS_INTERVAL=100` for the earlier cadence or
 `STRESS_THREADS=8` to tune a different machine. Intervals must be at least 1 ms;
 shorter intervals can reduce throughput by creating smaller blocks and more writes.
-Requires Rust, the Cap'n Proto compiler and Apple Silicon with Metal; Python, Node/npm and `uv` are not involved; MLX runs in the Rust process. One Rust-supervised node keeps the same chain across rounds and
+Requires Rust, Python 3 (standard library only), the Cap'n Proto compiler and Apple Silicon with Metal. Python supervises process lifecycle only; transaction generation, metrics and MLX run in Rust. One node keeps the same chain across rounds and
 restarts in `.sfc-stress-merkle-v1/node-0`. Startup prints its actual dashboard, Ethereum RPC,
 HTTP/3 sync endpoint, TLS certificate, config, database, index, and log locations.
 Run `make stop` in another terminal (or Ctrl-C) to stop the load generator and node.
+`make stressstart` starts this workload in the background and returns immediately.
+Build progress, startup URLs and TPS output append to `.sfc-processes/stress.log`.
+Use `tail -f .sfc-processes/stress.log` to follow it. Duplicate background starts
+return `Already running` successfully. The supervisor lock covers the build as well
+as the running workload, so `make stop` can cancel startup too.
 Stop preserves chain data and logs. A second concurrent stress runner is rejected.
 GPU verification is explicit; failures do not fall back to CPU. Execution and
 storage still run on CPU. Reported CPU includes all Rust node threads
@@ -279,7 +286,7 @@ make stop
 make stresstest STRESS_TRANSACTIONS=16384 STRESS_BATCH=1024
 # Also configurable: STRESS_INTERVAL=100 (ms), STRESS_DIR=.sfc-stress-merkle-v1,
 # STRESS_REPORT=.sfc-stress-merkle-v1/results.capnp
-# Use the same STRESS_DIR with make stop if you override it.
+# make stop discovers repository processes even when STRESS_DIR was overridden.
 ```
 
 The dashboard includes committed TPS, sampled process CPU/memory/thread counts,
@@ -471,13 +478,15 @@ make stop
 `.sfc-v3` if needed, and starts one background node. Open
 <http://127.0.0.1:8545/dashboard> to view statistics. Node logs append to
 `.sfc-v3/node.log`; Python service diagnostics go to `.sfc-v3/service.log`.
-`make stop` gracefully stops that managed node, allowing ten seconds before forced
-termination. Repeated start/stop commands are safe. A process-held lock and private
-Unix control socket avoid signaling a reused PID. These commands support macOS/Linux.
+`make stop` stops repository-owned background/foreground nodes, stress runners and
+supervisors (including their descendants). It checks current user, executable/script
+identity and process start time before signaling, waits for exit, then forcibly kills
+remaining processes after the grace period. It does not delete data or stop unrelated
+repositories. Repeated stop commands succeed. These commands support macOS/Linux.
 
-Use the same `DATA_DIR` when starting and stopping a custom home. Existing config
-and state are preserved; a custom `CONFIG` must already exist. `make stop` controls
-only this background service, not foreground `make run` or `make testnet` processes.
+Custom homes do not need to be repeated for `make stop`. Existing config and state
+are preserved; a custom `CONFIG` must already exist. Foreground `make run` and
+`make testnet` processes belonging to this repository are also stopped.
 Run `make test-service` to verify lifecycle and startup-failure cleanup.
 
 Binary bulk RPC benchmarking defaults to TCP. Use `BENCH_TRANSPORT=http3` to select
@@ -493,3 +502,19 @@ and **249,553 TPS with SQLite OFF** on one node. Two-node durable replay measure
 about 114k–119k TPS on the same machine/GPU. These are transfer benchmarks, not
 evidence of exceeding Hyperliquid’s order-book/BFT performance. See the
 [conditions and remaining performance gates](docs/BINARY-TRANSPORT-BENCHMARK.md).
+
+Stress dashboard remote access: `make stresstest` and `make stressstart` bind
+the shared dashboard/Ethereum HTTP RPC listener to `0.0.0.0` by default.
+Startup prints localhost, active IPv4 interface URLs, and a Tailscale URL when
+the local Tailscale CLI reports an address. Open that URL on an iPad connected
+to the same LAN or Tailscale network (subject to its access rules). The background
+command briefly relays startup URLs; during a longer build, follow the printed
+supervisor log path. Use `STRESS_BIND=127.0.0.1` for local-only HTTP access.
+Cap’n Proto sync remains on loopback. No router or firewall settings are changed.
+
+In foreground `make stresstest`, both **Ctrl-C** and **Ctrl-Z** request graceful
+shutdown instead of leaving a suspended node. The Python supervisor interrupts
+its owned Rust process group and waits for shutdown before releasing its lock;
+chain data remains available for the next run. Unresponsive children are killed
+after the shutdown timeout. `make test-stress-signals` verifies both keys through
+a real pseudo-terminal, including reopening the same chain after shutdown.

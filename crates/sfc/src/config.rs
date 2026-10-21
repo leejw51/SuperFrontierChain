@@ -51,8 +51,8 @@ impl Config {
             "queue limits must be nonzero and block transaction limit must be <=4096"
         );
         ensure!(
-            self.rpc_listen.ip().is_loopback() && self.peer_listen.ip().is_loopback(),
-            "development listeners must use loopback addresses"
+            self.peer_listen.ip().is_loopback(),
+            "development sync listener must use loopback"
         );
         if let Some(address) = self.capnp_listen {
             ensure!(

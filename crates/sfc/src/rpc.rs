@@ -40,6 +40,10 @@ async fn dashboard_asset(axum::extract::Path(name): axum::extract::Path<String>)
             "text/css; charset=utf-8",
             include_bytes!("../static/dashboard.css"),
         ),
+        "sfc-logo.png" => (
+            "image/png",
+            include_bytes!("../../../docs/assets/sfc-logo.png"),
+        ),
         "frontier-orbit.png" => ("image/png", include_bytes!("../static/frontier-orbit.png")),
         "dashboard.js.LEGAL.txt" => (
             "text/plain; charset=utf-8",

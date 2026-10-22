@@ -1,4 +1,4 @@
-import {encode,decode} from './capnp-codec.mjs';
+import { readConfig, writeConfig } from './config.mjs';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,6 +19,7 @@ async function freePort(udp = false) {
 }
 const binary = resolve('target/debug/sfc');
 const home = mkdtempSync(join(tmpdir(), 'sfc-erc20-'));
+const configPath = join(home, 'config.jsonl');
 let process, follower;
 const log = openSync(join(home, 'node.log'), 'w+');
 let id = 0;
@@ -34,11 +35,11 @@ async function stop(child) {
 try {
   const initialized = spawnSync(binary, ['init', '--home', home], { encoding: 'utf8' });
   assert.equal(initialized.status, 0, initialized.stderr);
-  const config = decode(readFileSync(join(home, 'config.capnp')));
+  const config = readConfig(configPath);
   config.rpc_listen = `127.0.0.1:${await freePort()}`;
   config.peer_listen = `127.0.0.1:${await freePort(true)}`;
   config.block_interval_ms = 500;
-  writeFileSync(join(home, 'config.capnp'), encode(config));
+  writeConfig(configPath, config);
   const url = `http://${config.rpc_listen}`;
   async function rpc(method, params = [], target = url) {
     const response = await fetch(target, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }), signal: AbortSignal.timeout(5000) });
@@ -50,7 +51,7 @@ try {
     for (let i = 0; i < 200; i++) { try { const result = await fn(); if (result) return result; } catch {} await sleep(50); }
     throw Error('timed out waiting for node');
   }
-  function launch() { return spawn(binary, ['run', '--config', join(home, 'config.capnp')], { stdio: ['ignore', log, log] }); }
+  function launch() { return spawn(binary, ['run', '--config', configPath], { stdio: ['ignore', log, log] }); }
   process = launch();
   await waitFor(() => rpc('eth_chainId'));
   const owner = new Wallet('0x' + '0'.repeat(63) + '1');
@@ -123,13 +124,14 @@ try {
   // A follower replays the actual deployment and token transactions over HTTP/3.
   const followerHome = join(home, 'follower');
   assert.equal(spawnSync(binary, ['init', '--home', followerHome]).status, 0);
-  const followerConfig = decode(readFileSync(join(followerHome, 'config.capnp')));
+  const followerConfigPath = join(followerHome, 'config.jsonl');
+  const followerConfig = readConfig(followerConfigPath);
   followerConfig.rpc_listen = `127.0.0.1:${await freePort()}`;
   followerConfig.peer_listen = `127.0.0.1:${await freePort(true)}`;
-  followerConfig.sync_peer = { address: config.peer_listen, server_name: 'localhost', certificate: config.tls_cert };
+  followerConfig.sync_peer = { transport: 'http3', address: config.peer_listen, server_name: 'localhost', certificate: config.tls_cert };
   writeFileSync(followerConfig.genesis, readFileSync(config.genesis));
-  writeFileSync(join(followerHome, 'config.capnp'), encode(followerConfig));
-  follower = spawn(binary, ['run', '--config', join(followerHome, 'config.capnp')], { stdio: ['ignore', log, log] });
+  writeConfig(followerConfigPath, followerConfig);
+  follower = spawn(binary, ['run', '--config', followerConfigPath], { stdio: ['ignore', log, log] });
   const followerUrl = `http://${followerConfig.rpc_listen}`;
   await waitFor(async () => await read('balanceOf', [recipient.address], followerUrl) === 140n);
   assert.equal(await read('allowance', [owner.address, spender.address], followerUrl), 10n);

@@ -5,6 +5,7 @@ import {mkdtempSync, writeFileSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {encode, decode} from './capnp-codec.mjs';
+import { readConfig } from './config.mjs';
 const oracle = resolve('target/release/examples/codec_roundtrip');
 const home = mkdtempSync(join(tmpdir(), 'sfc-codec-js-'));
 try {
@@ -18,8 +19,9 @@ try {
   const nodeHome = join(home, 'node');
   execFileSync(resolve('target/release/sfc'), ['init', '--home', nodeHome]);
   for (const kind of ['config', 'genesis']) {
-    const original = join(nodeHome, kind + '.capnp');
-    const typed = decode(readFileSync(original));
+    const typed = kind === 'config'
+      ? readConfig(join(nodeHome, 'config.jsonl'))
+      : decode(readFileSync(join(nodeHome, kind + '.capnp')));
     const roundtrip = join(home, kind + '.capnp');
     writeFileSync(roundtrip, encode(typed));
     assert.deepEqual(decode(execFileSync(oracle, ['--' + kind, roundtrip])), typed);

@@ -84,7 +84,7 @@ fn crash_after_acknowledged_writes(home: &Path) -> (Block, World, Vote) {
 }
 
 fn crash_after_writes(home: &Path, maintain: bool) -> (Block, World, Vote) {
-    crash_after_batches(home, maintain, 1, 1)
+    crash_after_batches(home, maintain, 1, 1, Duration::from_secs(30))
 }
 
 fn crash_after_batches(
@@ -92,6 +92,7 @@ fn crash_after_batches(
     maintain: bool,
     count: u64,
     batch: u64,
+    ready_timeout: Duration,
 ) -> (Block, World, Vote) {
     let mut command = Command::new(std::env::current_exe().unwrap());
     if maintain {
@@ -113,13 +114,16 @@ fn crash_after_batches(
         .spawn()
         .unwrap();
     let mut child = KillOnDrop(child);
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + ready_timeout;
     while !home.join("ready.capnp").exists() {
         assert!(
             child.0.try_wait().unwrap().is_none(),
             "writer exited before acknowledging writes"
         );
-        assert!(Instant::now() < deadline, "writer did not become ready");
+        assert!(
+            Instant::now() < deadline,
+            "writer did not become ready within {ready_timeout:?} ({count} blocks, {batch} transactions/block)"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     child.0.kill().unwrap();
@@ -145,7 +149,11 @@ fn crash_after_batches(
 #[test]
 fn entire_unsynced_history_recovers_after_many_acknowledged_blocks() {
     let home = tempfile::tempdir().unwrap();
-    let (head, world, _) = crash_after_batches(home.path(), true, 32, 1024);
+    // Signing 32,768 transactions in a debug build can exceed the small fixtures'
+    // 30-second setup budget. Keep the full >8 MiB recovery workload in CI and
+    // allow slower builders time to acknowledge it before the intentional crash.
+    let (head, world, _) =
+        crash_after_batches(home.path(), true, 32, 1024, Duration::from_secs(180));
     let history = home.path().join("chain/history");
     let paths: Vec<_> = fs::read_dir(&history)
         .unwrap()

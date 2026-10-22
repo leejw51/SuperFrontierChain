@@ -80,8 +80,8 @@ def daemon(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['start', 'stop', '_daemon'])
-    parser.add_argument('--home', default='.sfc-v3')
-    parser.add_argument('--config', default='.sfc-v3/config.capnp')
+    parser.add_argument('--home', default=str(pathlib.Path.home() / '.superfrontierchain/node'))
+    parser.add_argument('--config', default=str(pathlib.Path.home() / '.superfrontierchain/node/config.jsonl'))
     parser.add_argument('--binary', default='target/release/sfc')
     parser.add_argument('--lock-fd', type=int)
     args = parser.parse_args()
@@ -122,7 +122,7 @@ def main():
             return
         config = pathlib.Path(args.config)
         if not config.exists():
-            if config != home / 'config.capnp':
+            if config != home / 'config.jsonl':
                 raise RuntimeError('custom CONFIG does not exist')
             subprocess.run([args.binary, 'init', '--home', args.home], check=True, stdout=subprocess.DEVNULL)
         with (home / 'service.log').open('ab') as log:

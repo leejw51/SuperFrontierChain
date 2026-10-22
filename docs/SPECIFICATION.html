@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Super Frontier Chain — architecture, protocol and measured performance."><title>Super Frontier Chain — implementation specification · SFC</title><style>
-:root{color-scheme:dark;--bg:#080e19;--panel:#111b2a;--line:#243447;--ink:#eaf2fa;--muted:#a5b5c7;--mint:#8af0c3}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--mint);text-underline-offset:4px}a:hover{color:white}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}aside{position:fixed;inset:0 auto 0 0;width:270px;padding:30px 24px;border-right:1px solid var(--line);overflow:auto;background:#0b1320}aside img{width:220px;display:block;margin:0 0 22px}aside .caption,.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;font-weight:700;color:var(--mint)}nav a{display:block;text-decoration:none;color:var(--muted);font-size:13px;line-height:1.5;padding:9px 0}nav a.sub{padding-left:14px;font-size:12px}nav a:hover{color:var(--mint)}main{max-width:1220px;margin-left:270px;padding:60px clamp(24px,5vw,84px) 100px}header{border-bottom:1px solid var(--line);padding-bottom:36px;margin-bottom:40px}header .logo{width:min(560px,100%);display:block;margin-bottom:24px}.actions{display:flex;gap:12px;flex-wrap:wrap}.actions a{font-size:12px;border:1px solid var(--line);padding:6px 13px;border-radius:8px;text-decoration:none}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.04em;line-height:1.15;margin:12px 0 24px}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em;margin-top:58px;padding-top:12px}h3{font-size:19px;margin-top:30px}p,li{color:var(--muted)}strong{color:var(--ink)}li{padding:3px 0}code{font: .86em ui-monospace,SFMono-Regular,Consolas,monospace;background:#172335;border:1px solid #223349;border-radius:5px;padding:2px 5px;overflow-wrap:anywhere}pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;overflow:auto;line-height:1.55}pre code{background:none;border:0;padding:0;overflow-wrap:normal}.table-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:24px 0}table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.6}th{text-align:left;background:#192738;color:var(--mint)}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}td{color:var(--muted)}tr:last-child td{border-bottom:0}tr:hover td{background:#132033}.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:9px}.edge{display:grid;grid-template-columns:1fr .9fr 1fr;align-items:center;gap:12px;font-size:12px;line-height:1.5}.node{padding:10px 12px;border:1px solid #30465a;border-radius:8px;color:var(--ink);background:#0e1927}.arrow{text-align:center;color:var(--mint);font-size:11px}.arrow b{display:block;font-size:20px;line-height:1.2}details{margin-top:16px}summary{color:var(--mint);font-size:12px;cursor:pointer}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--muted)}.skip{position:absolute;top:-90px}.skip:focus{top:10px;left:290px;background:var(--panel);padding:10px;z-index:10}@media(max-width:900px){aside{position:static;width:auto;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}aside img{width:165px;margin:0}aside nav,aside .caption{display:none}main{margin:0;padding:30px 22px 60px}h2{margin-top:38px}.edge{grid-template-columns:1fr 70px 1fr;gap:6px}.flow{padding:12px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{aside,.actions,.skip{display:none}main{margin:0;padding:0;max-width:none}body{background:white;color:#111}p,li,td,footer{color:#333}h1,h2,h3,strong{color:#111}a{color:#175d49}pre,.flow,.node,th{background:#f4f7f8;color:#111}.table-scroll,pre,.flow{break-inside:avoid}header .logo{width:300px}}</style></head><body><a class="skip" href="#content">Skip to content</a><aside><a href="SPECIFICATION.html"><img src="assets/sfc-logo.png" alt="SFC — Super Frontier Chain"></a><p class="caption">On this page</p><nav aria-label="Table of contents"><a class="" href="#1-architecture">1. Architecture</a><a class="" href="#2-transaction-and-block-flow">2. Transaction and block flow</a><a class="" href="#3-byte-ownership-and-memory-copies">3. Byte ownership and memory copies</a><a class="" href="#4-state-commitment-and-persistence">4. State commitment and persistence</a><a class="" href="#5-peer-protocol-cap-n-proto-rpc">5. Peer protocol: Cap'n Proto RPC</a><a class="sub" href="#tcp-default">TCP (default)</a><a class="sub" href="#http-3-optional">HTTP/3 (optional)</a><a class="" href="#6-ethereum-compatible-http-rpc">6. Ethereum-compatible HTTP RPC</a><a class="" href="#7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</a><a class="" href="#8-remaining-optimization-targets-not-implemented">8. Remaining optimization targets (not implemented)</a><a class="" href="#9-execution-path-allocation-improvements">9. Execution-path allocation improvements</a><a class="sub" href="#remote-stress-dashboard">Remote stress dashboard</a></nav></aside><main id="content"><header><img class="logo" src="assets/sfc-logo.png" alt="Super Frontier Chain"><div class="eyebrow">Engineering documentation / SFC</div><p>Architecture. Execution. Evidence.</p><div class="actions"><a href="SPECIFICATION.md">Markdown source ↗</a><a href="SPECIFICATION.html">Specification</a><a href="EXECUTION-ALLOCATION-BENCHMARK.html">Benchmarks</a><a href="ETHEREUM.html">Ethereum compatibility</a></div></header><article><h1 id="super-frontier-chain-implementation-specification">Super Frontier Chain — implementation specification</h1><p>Status: development implementation, 2026-10-21. This document describes the current
+:root{color-scheme:dark;--bg:#080e19;--panel:#111b2a;--line:#243447;--ink:#eaf2fa;--muted:#a5b5c7;--mint:#8af0c3}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--mint);text-underline-offset:4px}a:hover{color:white}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}aside{position:fixed;inset:0 auto 0 0;width:270px;padding:30px 24px;border-right:1px solid var(--line);overflow:auto;background:#0b1320}aside img{width:220px;display:block;margin:0 0 22px}aside .caption,.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;font-weight:700;color:var(--mint)}nav a{display:block;text-decoration:none;color:var(--muted);font-size:13px;line-height:1.5;padding:9px 0}nav a.sub{padding-left:14px;font-size:12px}nav a:hover{color:var(--mint)}main{max-width:1220px;margin-left:270px;padding:60px clamp(24px,5vw,84px) 100px}header{border-bottom:1px solid var(--line);padding-bottom:36px;margin-bottom:40px}header .logo{width:min(560px,100%);display:block;margin-bottom:24px}.actions{display:flex;gap:12px;flex-wrap:wrap}.actions a{font-size:12px;border:1px solid var(--line);padding:6px 13px;border-radius:8px;text-decoration:none}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.04em;line-height:1.15;margin:12px 0 24px}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em;margin-top:58px;padding-top:12px}h3{font-size:19px;margin-top:30px}p,li{color:var(--muted)}strong{color:var(--ink)}li{padding:3px 0}code{font: .86em ui-monospace,SFMono-Regular,Consolas,monospace;background:#172335;border:1px solid #223349;border-radius:5px;padding:2px 5px;overflow-wrap:anywhere}pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;overflow:auto;line-height:1.55}pre code{background:none;border:0;padding:0;overflow-wrap:normal}.table-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:24px 0}table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.6}th{text-align:left;background:#192738;color:var(--mint)}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}td{color:var(--muted)}tr:last-child td{border-bottom:0}tr:hover td{background:#132033}.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:9px}.edge{display:grid;grid-template-columns:1fr .9fr 1fr;align-items:center;gap:12px;font-size:12px;line-height:1.5}.node{padding:10px 12px;border:1px solid #30465a;border-radius:8px;color:var(--ink);background:#0e1927}.arrow{text-align:center;color:var(--mint);font-size:11px}.arrow b{display:block;font-size:20px;line-height:1.2}details{margin-top:16px}summary{color:var(--mint);font-size:12px;cursor:pointer}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--muted)}.skip{position:absolute;top:-90px}.skip:focus{top:10px;left:290px;background:var(--panel);padding:10px;z-index:10}@media(max-width:900px){aside{position:static;width:auto;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}aside img{width:165px;margin:0}aside nav,aside .caption{display:none}main{margin:0;padding:30px 22px 60px}h2{margin-top:38px}.edge{grid-template-columns:1fr 70px 1fr;gap:6px}.flow{padding:12px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{aside,.actions,.skip{display:none}main{margin:0;padding:0;max-width:none}body{background:white;color:#111}p,li,td,footer{color:#333}h1,h2,h3,strong{color:#111}a{color:#175d49}pre,.flow,.node,th{background:#f4f7f8;color:#111}.table-scroll,pre,.flow{break-inside:avoid}header .logo{width:300px}}</style></head><body><a class="skip" href="#content">Skip to content</a><aside><a href="SPECIFICATION.html"><img src="assets/sfc-logo.png" alt="SFC — Super Frontier Chain"></a><p class="caption">On this page</p><nav aria-label="Table of contents"><a class="" href="#1-architecture">1. Architecture</a><a class="" href="#2-transaction-and-block-flow">2. Transaction and block flow</a><a class="" href="#3-byte-ownership-and-memory-copies">3. Byte ownership and memory copies</a><a class="" href="#4-state-commitment-and-persistence">4. State commitment and persistence</a><a class="" href="#5-peer-protocol-cap-n-proto-rpc">5. Peer protocol: Cap'n Proto RPC</a><a class="sub" href="#tcp-default">TCP (default)</a><a class="sub" href="#http-3-optional">HTTP/3 (optional)</a><a class="" href="#6-ethereum-compatible-http-rpc">6. Ethereum-compatible HTTP RPC</a><a class="" href="#7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</a><a class="" href="#8-remaining-optimization-targets-not-implemented">8. Remaining optimization targets (not implemented)</a><a class="" href="#9-execution-path-allocation-improvements">9. Execution-path allocation improvements</a><a class="sub" href="#remote-stress-dashboard">Remote stress dashboard</a><a class="sub" href="#jsonl-settings-and-short-retention">JSONL settings and short retention</a><a class="" href="#10-shared-hashes-and-bounded-block-reads-2026-10-22">10. Shared hashes and bounded block reads — 2026-10-22</a><a class="sub" href="#measurements-and-remaining-throughput-limit">Measurements and remaining throughput limit</a><a class="" href="#11-throughput-stall-investigation-and-follow-up-2026-10-22">11. Throughput stall investigation and follow-up (2026-10-22)</a><a class="sub" href="#cause-and-persistence-change">Cause and persistence change</a><a class="sub" href="#native-mlx-dispatch">Native MLX dispatch</a><a class="sub" href="#final-paired-throughput-and-validation">Final paired throughput and validation</a></nav></aside><main id="content"><header><img class="logo" src="assets/sfc-logo.png" alt="Super Frontier Chain"><div class="eyebrow">Engineering documentation / SFC</div><p>Architecture. Execution. Evidence.</p><div class="actions"><a href="SPECIFICATION.md">Markdown source ↗</a><a href="SPECIFICATION.html">Specification</a><a href="EXECUTION-ALLOCATION-BENCHMARK.html">Benchmarks</a><a href="ETHEREUM.html">Ethereum compatibility</a></div></header><article><h1 id="super-frontier-chain-implementation-specification">Super Frontier Chain — implementation specification</h1><p>Status: development implementation, 2026-10-21. This document describes the current
 Rust code, not a production L1 or full Ethereum conformance claim. Wire schemas
 are authoritative: <code>crates/sfc/schema/chain.capnp</code>, <code>storage.capnp</code>, <code>runtime.capnp</code>.</p>
 <h2 id="1-architecture">1. Architecture</h2><div class="flow" aria-label="Architecture data flow"><div class="edge"><div class="node">Wallet / Solidity tools</div><div class="arrow">HTTP JSON-RPC<b aria-label="to">→</b></div><div class="node">Ethereum adapter</div></div><div class="edge"><div class="node">Rust Rayon load generator</div><div class="arrow">Capnp RPC: TCP or HTTP/3<b aria-label="to">→</b></div><div class="node">Peer service</div></div><div class="edge"><div class="node">Ethereum adapter</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">CPU / native MLX GPU / HYBRID verifier</div></div><div class="edge"><div class="node">Peer service</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">CPU / native MLX GPU / HYBRID verifier</div></div><div class="edge"><div class="node">CPU / native MLX GPU / HYBRID verifier</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Ordered sequencer pending queue</div></div><div class="edge"><div class="node">Ordered sequencer pending queue</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">REVM Shanghai execution</div></div><div class="edge"><div class="node">REVM Shanghai execution</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Binary Merkle Patricia state trie</div></div><div class="edge"><div class="node">Binary Merkle Patricia state trie</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Atomic RocksDB WAL commit</div></div><div class="edge"><div class="node">Atomic RocksDB WAL commit</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Async SQLite WAL index</div></div><div class="edge"><div class="node">Async SQLite WAL index</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Dashboard / explorer / log search</div></div><div class="edge"><div class="node">Atomic RocksDB WAL commit</div><div class="arrow">Canonical Capnp block bytes<b aria-label="to">→</b></div><div class="node">Verifying followers</div></div><div class="edge"><div class="node">Verifying followers</div><div class="arrow"><b aria-label="to">→</b></div><div class="node">Verify signatures / re-execute / compare records</div></div></div><details><summary>View Mermaid source</summary><pre><code>flowchart LR
@@ -206,10 +206,10 @@ conformance claim. See <a href="ETHEREUM.html">compatibility details</a>.</p>
 <h2 id="7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</h2><p><code>make stresstest</code>: release build, one sequencer, native MLX GPU, SQLite ON, Capnp TCP,
 12 Rayon workers, 4,096-entry batches, one in-flight batch, 10 ms block scheduling,
 1,048,576 transactions per round. Runs until <code>make stop</code> or Ctrl-C. Startup prints
-URLs and persistence paths. Home: <code>.sfc-stress-merkle-v1</code>; old homes are preserved.</p>
+URLs and persistence paths. Home: <code>~/.superfrontierchain/stress</code>; old homes are preserved.</p>
 <p>Python supervises the build and Rust runner lifecycle; no benchmark computation or
 GPU execution runs in Python. <code>make stressstart</code> starts the same workload in the
-background. Supervisor output is appended to <code>.sfc-processes/stress.log</code>. Duplicate
+background. Supervisor output is appended to <code>~/.superfrontierchain/supervisor/stress.log</code>. Duplicate
 starts return successfully without starting another runner. <code>make stop</code> discovers
 this repository&#39;s current-user blockchain processes and supervisors, terminates
 their descendants, waits for exit and escalates to SIGKILL after a grace period.
@@ -262,4 +262,223 @@ local and network dashboard URLs, including the Tailscale IPv4 URL when
 available. An iPad must share the LAN or have permitted access through Tailscale.
 Set <code>STRESS_BIND=127.0.0.1</code> to restrict HTTP access to this machine.
 Direct benchmark runs retain a loopback default unless <code>--rpc-bind</code> is supplied.</p>
-</article><footer>Super Frontier Chain · Generated from SPECIFICATION.md · Rebuild: npm run build:docs<br>Static, offline-readable documentation. No external scripts, fonts or trackers.</footer></main></body></html>
+<h3 id="jsonl-settings-and-short-retention">JSONL settings and short retention</h3><p>Persistence defaults to <code>~/.superfrontierchain</code>, with separate <code>node/</code>,
+<code>stress/node-0/</code>, <code>testnet/</code> and <code>supervisor/</code> directories. Node settings
+are in <code>config.jsonl</code>, one top-level field per JSON line. Edit and restart:</p>
+<pre><code>{&quot;retention&quot;:{&quot;mode&quot;:&quot;pruned&quot;,&quot;seconds&quot;:60}}</code></pre><p>The default is <strong>60 seconds</strong>, configurable as a positive integer; archive mode
+is explicit. Existing configuration values are preserved when loading old homes.
+Legacy Cap’n Proto configs remain readable and are preserved during JSONL migration.
+Genesis and chain/network data remain Cap’n Proto.</p>
+<p>RocksDB expires blocks and receipt indexes relative to the committed head timestamp.
+SQLite asynchronously removes rows older than RocksDB&#39;s earliest retained height,
+including transaction receipts, and expires indexed logs by wall-clock age.
+Current state remains. Projection segments rotate at min(retention seconds, 60),
+so a partial boundary segment can retain up to one additional segment. SQLite
+reuses freed pages and RocksDB reclaims physical space during compaction.
+Raw diagnostic logs and benchmark reports have separate lifetimes; retention
+is not a total disk-size limit.</p>
+<h2 id="10-shared-hashes-and-bounded-block-reads-2026-10-22">10. Shared hashes and bounded block reads — 2026-10-22</h2><p>Block clones share their lazy Keccak cache as well as their immutable Cap&#39;n Proto
+bytes. Computing a hash in the durable head cache now initializes the producer,
+logging and subsequent-parent views too, including clones created before hashing.
+The hash domain, canonical bytes and consensus rules are unchanged.</p>
+<p>Local block construction checks transaction count, receipt count and byte bounds
+before allocating its arena. Fixed-width hashes and Rust strings guarantee the
+remaining width/UTF-8 invariants; log hex is checked while writing. Canonicalization
+still uses <code>set_root_canonical</code>. Ordinary locally built blocks avoid a second full
+wire scan. Records larger than 32 MiB retain full reader validation to preserve
+traversal-budget acceptance. All incoming network and persisted bytes retain the
+complete canonical and structural checks. Index receipt records are canonicalized
+directly from their borrowed reader, avoiding an intermediate receipt arena.</p>
+<p>The three block-read RPC methods use blocking workers and a shared Store, without
+holding the Node mutex. A RocksDB snapshot and cached head are captured together
+under the store&#39;s head lock; the lock is released before disk reads and validation.
+The snapshot preserves a consistent batch while commits/pruning proceed. Existing
+64-block and approximately 2 MiB batch bounds remain, allowing one larger first
+block. Each connection allows two active block reads; a worker retains its permit
+even when its caller is cancelled, through completion and response construction.</p>
+<p>GPU runtime remains native MLX, with the existing kernels, 2,048-record crossover,
+50-microsecond completion polling and CPU/GPU/HYBRID rules. A focused benchmark
+checks CPU-equivalent transactions and measures native verification at small,
+large and crossover batches, excluding signing, network, execution and disk:</p>
+<pre><code>RAYON_NUM_THREADS=12 cargo run --offline --locked --release --example verification_benchmark</code></pre><h3 id="measurements-and-remaining-throughput-limit">Measurements and remaining throughput limit</h3><p><a href="hash-capnp-results-2026-10-22.json">Raw results and methodology</a> retain all trials,
+binary hashes, codec allocations, GPU latency and diagnostic exclusions.
+In an isolated release codec run (4,096 transfers, seven samples), local block
+construction fell from <strong>863.1 to 478.2 microseconds (44.6% less time)</strong>. Incoming
+block validation remained approximately 389/384 microseconds. Sharing the hash
+cache adds one 56-byte allocation per constructed/imported block; borrowed field
+reads still allocate nothing.</p>
+<p>This is <strong>not a demonstrated end-to-end throughput improvement</strong>. Three alternating
+million-transfer pairs, native MLX, TCP, SQLite ON, 12 Rayon workers and a 10 ms
+scheduler produced:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Pair</th>
+<th align="right">Before committed TPS</th>
+<th align="right">After committed TPS</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td align="right">257,666</td>
+<td align="right">206,202</td>
+</tr>
+<tr>
+<td>2</td>
+<td align="right">258,726</td>
+<td align="right">204,907</td>
+</tr>
+<tr>
+<td>3</td>
+<td align="right">210,673</td>
+<td align="right">256,699</td>
+</tr>
+<tr>
+<td>Median</td>
+<td align="right">257,666</td>
+<td align="right">206,202</td>
+</tr>
+</tbody></table></div>
+<p>The primary median is <strong>20.0% lower</strong>. Median node CPU time per transfer changed
+from 10.66 to 10.48 microseconds and post-commit SQLite catch-up from 10.09 to
+9.93 seconds. Both binaries also showed approximately 200k/260k TPS modes in
+additional diagnostics, so these changes must not be advertised as a throughput
+win or a sustained-capacity measurement.</p>
+<p>A separate persistent-run diagnostic recorded 7 versus 137 empty blocks between
+its first and last full transaction blocks (256 full blocks in each run). That
+pair achieved 260,172 versus 255,418 TPS with lower node CPU in the candidate.
+This motivates investigation of timer/admission interaction; it does not isolate
+the cause of the primary regression. Empty-block scheduling policy is unchanged.
+The first extra reverse-order candidate trial briefly overlapped an earlier
+codec run; those diagnostic trials are excluded from the primary comparison.</p>
+<p>Validation passed: 82 standard release tests; native MLX differential tests;
+CPU/GPU/HYBRID order, error and state/replay parity; three native benchmark,
+recovery and replication tests; release Clippy with warnings denied; formatting
+and whitespace checks. The new RPC regression holds the execution mutex while
+all three block-read methods complete over both TCP and HTTP/3.</p>
+<h2 id="11-throughput-stall-investigation-and-follow-up-2026-10-22">11. Throughput stall investigation and follow-up (2026-10-22)</h2><p><a href="tps-investigation-2026-10-22.json">Raw trials, phase timings and exclusions</a>
+record the follow-up to section 10. Temporary diagnostic builds buffered timing
+records in memory and wrote them on exit. Final throughput runs use the ordinary
+release executable without those probes.</p>
+<h3 id="cause-and-persistence-change">Cause and persistence change</h3><p>The slow mode reproduced with nearly unchanged verification and block execution
+time. In one fast/slow pair, total history projection sync time increased from
+136 to 977 ms; individual syncs averaged 3.8 versus 26.4 ms and reached 114 ms.
+These syncs ran inside <code>Node::produce</code>, holding the execution mutex and delaying
+admission. Both modes produced similar numbers of empty blocks, so empty-block
+count was not a sufficient explanation.</p>
+<p>A background-fsync prototype did not remove the slowdown: in a slow traced run,
+RocksDB commit time increased from about 4.3 to 6.8 ms per full block, with an
+86 ms maximum. The measurements are consistent with storage contention moving
+between the two writers; they do not identify the underlying device/OS cause of
+variable fsync latency. The prototype was discarded.</p>
+<p>The retained implementation removes the projection&#39;s periodic 100 ms / 8 MiB
+sync. History records are still appended immediately and synced on segment close
+and clean shutdown. The authoritative RocksDB WAL still synchronously commits
+every block before acknowledgment; its options and the signing journal are
+unchanged. A crash may lose more projection bytes, which restart reconstructs
+from retained RocksDB blocks. A regression test SIGKILLs a writer after 32 blocks
+and 32,768 transactions, removes all history files (over 8 MiB), and verifies
+recovered blocks, world state and transaction lookup.</p>
+<p>SQLite catch-up now reads its earliest height and bounded block batch from a
+single RocksDB snapshot. It neither waits for nor holds the Node mutex during
+block reads/validation. The 16-block / approximately 8 MiB batch limit and atomic
+SQLite row/cursor commits remain. A regression holds the execution mutex while
+the indexer catches up to a newly committed block.</p>
+<h3 id="native-mlx-dispatch">Native MLX dispatch</h3><p>The MLX runtime and kernel arithmetic remain unchanged. Measurements of the two
+existing paths favor cooperative recovery through 2,560 records on this M5 Max;
+at 2,816 and 4,096 records the direct path is faster. The native MLX crossover is
+therefore 2,560; direct Metal&#39;s selection is unchanged. CPU differential checks
+include 2,559/2,560/2,561 as well as the former boundary.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Batch</th>
+<th align="right">Previous selection</th>
+<th align="right">Cooperative path</th>
+<th align="right">Latency reduction</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2,049</td>
+<td align="right">8.406 ms</td>
+<td align="right">7.154 ms</td>
+<td align="right">14.9%</td>
+</tr>
+<tr>
+<td>2,304</td>
+<td align="right">8.438 ms</td>
+<td align="right">7.331 ms</td>
+<td align="right">13.1%</td>
+</tr>
+<tr>
+<td>2,560</td>
+<td align="right">8.456 ms</td>
+<td align="right">7.487 ms</td>
+<td align="right">11.5%</td>
+</tr>
+</tbody></table></div>
+<p>These are total native verification microbenchmarks, including CPU preparation
+and GPU wait, with nine samples of ten iterations. They exclude RPC, execution
+and storage. The 4,096-record end-to-end workload uses the same direct GPU path
+before and after, so its throughput change is not attributed to this crossover.</p>
+<h3 id="final-paired-throughput-and-validation">Final paired throughput and validation</h3><p>Four pairs alternate AB/BA order. The baseline already includes section 10&#39;s
+Capnp optimizations; the candidate adds the changes in this section. Both use
+1,048,576 transfers, 4,096 records per RPC, inflight 1, 10 ms scheduling, one node,
+TCP, native MLX, SQLite ON and 12 Rayon threads. Signing is outside timing;
+verification, execution and durable RocksDB commit are inside. Index catch-up is
+measured afterward.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Pair</th>
+<th align="right">Before TPS</th>
+<th align="right">After TPS</th>
+<th align="right">Paired improvement</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td align="right">258,254</td>
+<td align="right">270,617</td>
+<td align="right">4.8%</td>
+</tr>
+<tr>
+<td>2</td>
+<td align="right">209,945</td>
+<td align="right">214,793</td>
+<td align="right">2.3%</td>
+</tr>
+<tr>
+<td>3</td>
+<td align="right">255,328</td>
+<td align="right">269,234</td>
+<td align="right">5.4%</td>
+</tr>
+<tr>
+<td>4</td>
+<td align="right">213,226</td>
+<td align="right">267,705</td>
+<td align="right">25.5%</td>
+</tr>
+</tbody></table></div>
+<p>All four pairs improved; the median of the <strong>paired improvements is 5.1%</strong>.
+The ratio of the separate TPS medians is larger: 234,277 to 268,470, or 14.6%.
+The difference reflects the fast/slow execution modes and must not be presented
+as a uniform 14.6% gain. Median CPU time per transfer decreased from 10.18 to
+9.97 microseconds; median post-commit SQLite catch-up decreased from 9.98 to 9.63 s.
+The remaining 214,793 TPS candidate run shows that the low-throughput mode was
+not completely eliminated.</p>
+<p>A separate persistent-node check completed three million-transfer rounds at
+270,139 / 270,033 / 270,909 TPS. Each round signs before timing and does not wait
+for SQLite catch-up before the next round. Its fixture differs from the paired
+runs, so it is not included in those statistics. Neither experiment establishes
+long-term saturated capacity, large-contract-state or multi-host throughput.</p>
+<p>Validation passed: 84 standard release tests, native MLX differential tests at
+the new crossover, CPU/GPU/HYBRID state and replay parity, all three native
+benchmark/recovery/replication tests, release Clippy with warnings denied, format
+and whitespace checks. No temporary tracing or experimental environment switches
+are present in the production source.</p>
+<pre><code>RAYON_NUM_THREADS=12 target/release/sfc-bench bench \
+  --binary /path/to/sfc --transactions 1048576 --rpc-batch 4096 \
+  --inflight 1 --interval 10 --repeat 1 --sqlite on --output /tmp/result.capnp
+# Alternate the retained before/after release binaries for paired comparisons.</code></pre></article><footer>Super Frontier Chain · Generated from SPECIFICATION.md · Rebuild: npm run build:docs<br>Static, offline-readable documentation. No external scripts, fonts or trackers.</footer></main></body></html>

@@ -308,7 +308,9 @@ fn legacy_sqlite(db: &Connection, version: u32) {
 fn sqlite_upgrades_all_older_versions_preserving_rows_cursors_and_wal() {
     for version in [0, 1, 2] {
         let dir = tempfile::tempdir().unwrap();
-        let config = common::config(dir.path());
+        let mut config = common::config(dir.path());
+        // Migration preservation is independent of the live retention worker.
+        config.retention = sfc::config::Retention::Archive;
         let data = config.data_dir.clone();
         let node = Arc::new(Mutex::new(
             Node::open(config, Application::default()).unwrap(),

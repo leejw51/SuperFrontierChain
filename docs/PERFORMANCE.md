@@ -1,5 +1,9 @@
 # Performance measurements
 
+Latest native MLX/Cap’n Proto investigation:
+[projection sync stalls, indexer isolation and dispatch tuning](SPECIFICATION.md#11-throughput-stall-investigation-and-follow-up-2026-10-22).
+The dated comparisons below retain their original workloads and persistence policies.
+
 Latest GPU enhancement: [cooperative recovery, paired TPS and CPU measurements](GPU-ENHANCEMENT.md).
 
 Original node backend comparison: [CPU/GPU/HYBRID TPS and CPU usage](VERIFICATION-BACKENDS.md).

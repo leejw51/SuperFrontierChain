@@ -1,4 +1,4 @@
-use crate::types::WEEK;
+pub const DEFAULT_RETENTION_SECONDS: u64 = 60;
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
@@ -33,7 +33,9 @@ pub enum Retention {
 }
 impl Default for Retention {
     fn default() -> Self {
-        Self::Pruned { seconds: WEEK }
+        Self::Pruned {
+            seconds: DEFAULT_RETENTION_SECONDS,
+        }
     }
 }
 impl Config {
@@ -96,6 +98,59 @@ impl SyncPeer {
         Ok(())
     }
 }
+/// Human-editable settings: one top-level field per JSON line. Duplicates are errors.
+pub fn decode_jsonl(bytes: &[u8]) -> Result<Config> {
+    let mut fields = serde_json::Map::new();
+    for (index, line) in std::str::from_utf8(bytes)?.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let object: serde_json::Map<String, serde_json::Value> = serde_json::from_str(line)
+            .map_err(|e| anyhow::anyhow!("config line {}: {e}", index + 1))?;
+        for (key, value) in object {
+            ensure!(!fields.contains_key(&key), "duplicate config field {key}");
+            fields.insert(key, value);
+        }
+    }
+    let config: Config = serde_json::from_value(fields.into())?;
+    config.validate()?;
+    Ok(config)
+}
+pub fn encode_jsonl(config: &Config) -> Result<Vec<u8>> {
+    let value = serde_json::to_value(config)?;
+    let mut out = Vec::new();
+    for (key, value) in value.as_object().expect("config object") {
+        serde_json::to_writer(&mut out, &serde_json::json!({key: value}))?;
+        out.push(b'\n');
+    }
+    Ok(out)
+}
+pub fn load(path: &std::path::Path) -> Result<Config> {
+    if path.extension().is_some_and(|v| v == "jsonl") {
+        if !path.exists() && path.with_extension("capnp").exists() {
+            return crate::codec::from_slice(&std::fs::read(path.with_extension("capnp"))?);
+        }
+        decode_jsonl(&std::fs::read(path)?)
+    } else {
+        crate::codec::from_slice(&std::fs::read(path)?)
+    }
+}
+pub fn save(path: &std::path::Path, config: &Config) -> Result<()> {
+    use std::io::Write;
+    config.validate()?;
+    let target = path.with_extension("jsonl");
+    let temp = target.with_extension("jsonl.tmp");
+    let mut file = std::fs::File::create(&temp)?;
+    file.write_all(&encode_jsonl(config)?)?;
+    file.sync_all()?;
+    std::fs::rename(temp, &target)?;
+    std::fs::File::open(target.parent().unwrap())?.sync_all()?;
+    Ok(())
+}
+pub fn persistence_root() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").expect("HOME must be set")).join(".superfrontierchain")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

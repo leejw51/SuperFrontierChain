@@ -30,24 +30,39 @@ fn journal_crash_worker() {
     let home = PathBuf::from(std::env::var_os("SFC_JOURNAL_TEST_HOME").expect("test home"));
     let genesis = genesis();
     let store = Store::open(&home.join("chain"), Retention::default(), &genesis).unwrap();
-    let (block, world) = Application::default()
-        .execute_block(
-            &store.head().unwrap(),
-            &store.world().unwrap(),
-            genesis.timestamp + 1,
-            genesis.gas_limit,
-            &[transfer(0)],
-        )
+    let count: u64 = std::env::var("SFC_JOURNAL_BLOCK_COUNT")
+        .unwrap_or_else(|_| "1".into())
+        .parse()
         .unwrap();
-    store.commit(&block, &world).unwrap();
-    if std::env::var_os("SFC_JOURNAL_MAINTAIN").is_some() {
-        store.maintain().unwrap();
+    let batch: u64 = std::env::var("SFC_JOURNAL_BATCH_SIZE")
+        .unwrap_or_else(|_| "1".into())
+        .parse()
+        .unwrap();
+    let mut block = store.head().unwrap();
+    let mut world = store.world().unwrap();
+    for height in 1..=count {
+        let transactions: Vec<_> = ((height - 1) * batch..height * batch)
+            .map(transfer)
+            .collect();
+        (block, world) = Application::default()
+            .execute_block(
+                &block,
+                &world,
+                genesis.timestamp + height,
+                genesis.gas_limit,
+                &transactions,
+            )
+            .unwrap();
+        store.commit(&block, &world).unwrap();
+        if std::env::var_os("SFC_JOURNAL_MAINTAIN").is_some() {
+            store.maintain().unwrap();
+        }
     }
     // Deliberately leave both databases open for the parent's SIGKILL.
     let mut signer =
         DurableSigner::open(&home.join("signer"), 7777, SigningKey::from_bytes(&[7; 32])).unwrap();
     let vote = signer
-        .sign(1, 0, Phase::Precommit, Some(block.hash()))
+        .sign(block.height(), 0, Phase::Precommit, Some(block.hash()))
         .unwrap();
     let mut expected = Vec::new();
     for bytes in [
@@ -69,6 +84,15 @@ fn crash_after_acknowledged_writes(home: &Path) -> (Block, World, Vote) {
 }
 
 fn crash_after_writes(home: &Path, maintain: bool) -> (Block, World, Vote) {
+    crash_after_batches(home, maintain, 1, 1)
+}
+
+fn crash_after_batches(
+    home: &Path,
+    maintain: bool,
+    count: u64,
+    batch: u64,
+) -> (Block, World, Vote) {
     let mut command = Command::new(std::env::current_exe().unwrap());
     if maintain {
         command.env("SFC_JOURNAL_MAINTAIN", "1");
@@ -83,11 +107,13 @@ fn crash_after_writes(home: &Path, maintain: bool) -> (Block, World, Vote) {
             "--nocapture",
         ])
         .env("SFC_JOURNAL_TEST_HOME", home)
+        .env("SFC_JOURNAL_BLOCK_COUNT", count.to_string())
+        .env("SFC_JOURNAL_BATCH_SIZE", batch.to_string())
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
     let mut child = KillOnDrop(child);
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !home.join("ready.capnp").exists() {
         assert!(
             child.0.try_wait().unwrap().is_none(),
@@ -117,13 +143,51 @@ fn crash_after_writes(home: &Path, maintain: bool) -> (Block, World, Vote) {
 }
 
 #[test]
+fn entire_unsynced_history_recovers_after_many_acknowledged_blocks() {
+    let home = tempfile::tempdir().unwrap();
+    let (head, world, _) = crash_after_batches(home.path(), true, 32, 1024);
+    let history = home.path().join("chain/history");
+    let paths: Vec<_> = fs::read_dir(&history)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    let bytes: u64 = paths.iter().map(|p| fs::metadata(p).unwrap().len()).sum();
+    assert!(bytes > 8 * 1024 * 1024);
+    // Lose every rebuildable segment after SIGKILL, including several batches
+    // beyond the former 8 MiB checkpoint. Authoritative WAL files stay intact.
+    for path in paths {
+        fs::remove_file(path).unwrap();
+    }
+    let store = Store::open(&home.path().join("chain"), Retention::default(), &genesis()).unwrap();
+    assert_eq!(store.head().unwrap(), head);
+    assert_eq!(store.world().unwrap(), world);
+    let mut blocks: Vec<Block> = fs::read_dir(history)
+        .unwrap()
+        .flat_map(|entry| {
+            sfc::codec::read_all::<Block>(&mut fs::File::open(entry.unwrap().path()).unwrap())
+                .unwrap()
+        })
+        .collect();
+    blocks.sort_by_key(Block::height);
+    assert_eq!(blocks.len(), 33);
+    for (height, block) in blocks.iter().enumerate() {
+        assert_eq!(block.height(), height as u64);
+        assert_eq!(store.block(height as u64).unwrap().as_ref(), Some(block));
+    }
+    assert_eq!(
+        store.receipt_block(&transfer(32 * 1024 - 1).hash).unwrap(),
+        Some(head)
+    );
+}
+
+#[test]
 fn batched_history_recovers_missing_or_torn_tail_after_kill() {
     for torn in [false, true] {
         let home = tempfile::tempdir().unwrap();
         let (block, world, _) = crash_after_writes(home.path(), true);
         let segment = home.path().join(format!(
             "chain/history/{:020}.capnp",
-            block.timestamp() / 3600
+            block.timestamp() / 60
         ));
         let file = fs::OpenOptions::new().write(true).open(&segment).unwrap();
         let retained = if torn {
@@ -160,7 +224,7 @@ fn acknowledged_state_and_signing_guard_recover_after_process_kill() {
     let (block, world, vote) = crash_after_acknowledged_writes(home.path());
     let segment = home.path().join(format!(
         "chain/history/{:020}.capnp",
-        block.timestamp() / 3600
+        block.timestamp() / 60
     ));
     assert_eq!(
         sfc::codec::read_all::<Block>(&mut fs::File::open(&segment).unwrap())

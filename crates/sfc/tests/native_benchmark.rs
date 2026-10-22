@@ -107,11 +107,10 @@ fn rust_stress_stop_restart_lock_and_sqlite_toggle() {
     stop(home, &mut child);
     // Force partial admission within a batch and nonce gaps in the pipelined
     // successor. The Rust driver must retry the suffix, never count it as committed.
-    let config_path = home.join("node-0/config.capnp");
-    let mut config: sfc::config::Config =
-        codec::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    let config_path = home.join("node-0/config.jsonl");
+    let mut config: sfc::config::Config = sfc::config::load(&config_path).unwrap();
     config.max_pending = 16;
-    fs::write(&config_path, codec::to_vec(&config).unwrap()).unwrap();
+    sfc::config::save(&config_path, &config).unwrap();
     let old_count = records(&home.join("results.capnp")).len();
     let db = home.join("node-0/data/index.sqlite");
     assert!(db.exists());

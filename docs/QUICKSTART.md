@@ -1,11 +1,12 @@
 # SFC quickstart
 
-SuperFroniterChain (SFC) is an MIT-licensed Rust blockchain framework with Ethereum
+Super Frontier Chain (SFC) is an MIT-licensed Rust blockchain framework with Ethereum
 contract execution, 100 ms blocks, and Cap’n Proto RPC over HTTP/3 synchronization.
 The runnable topology is one development sequencer and verifying followers.
 Distributed validator consensus is not integrated.
 
-Protocol v3 starts in fresh `-v2` homes and preserves old JSON chain directories.
+New homes use protocol v3 with Merkle Patricia state commitments. Use a fresh home
+for older flat-hash chains; existing chain directories are preserved.
 See [binary formats and configuration editing](CAPNP-V3.md).
 
 ## Requirements
@@ -31,7 +32,7 @@ make start
 ```
 
 `make` alone shows help. `make start` builds the optimized release binary,
-initializes `.sfc-v3/` if configuration is absent, and starts a background node.
+initializes `~/.superfrontierchain/node/` if configuration is absent, and starts a background node.
 Existing configuration and state are reused. For CPU mode use
 `SFC_VERIFICATION_BACKEND=cpu make start`; for HYBRID use
 `SFC_VERIFICATION_BACKEND=hybrid make start`. An already-running service must be
@@ -53,7 +54,7 @@ python3 scripts/sfc_codec.py /tmp/sfc-stats.capnp
 make peer-status
 ```
 
-Expected chain ID: `0x1e61` (7777). Peer status uses HTTP/3 by default.
+Expected chain ID: `0x1e61` (7777). Peer status uses TCP by default; select HTTP/3 with `TRANSPORT=http3`.
 
 ## Stop and restart
 
@@ -63,17 +64,17 @@ make start
 ```
 
 Stop requests graceful shutdown and allows ten seconds before forced termination.
-Repeated commands are safe. Stop controls only the background service for that
-home; it does not stop foreground nodes or a separately running testnet.
+Repeated commands are safe. The repository-wide stop command also stops its foreground nodes, testnet and
+stress processes. It leaves unrelated processes running.
 
-For a custom home, use the same value on both commands:
+To start in a custom home (stop still applies repository-wide):
 
 ```sh
 make start DATA_DIR=.sfc-local
 make stop DATA_DIR=.sfc-local
 ```
 
-Custom homes still default to the same ports. Change their `config.capnp` listener
+Custom homes still default to the same ports. Change their `config.jsonl` listener
 addresses before running multiple independent services. If `CONFIG` overrides the
 default path, that file must already exist.
 
@@ -94,20 +95,21 @@ node diagnostics to `DATA_DIR/node.log`.
 | --- | --- |
 | Ethereum HTTP JSON-RPC | `127.0.0.1:8545` |
 | Peer HTTP/3 over UDP | `127.0.0.1:26656` |
-| Direct Cap’n Proto TCP | Disabled |
+| Direct Cap’n Proto TCP | `127.0.0.1:26656`, default sync transport |
 | Block interval | 100 ms |
-| History retention | 604800 seconds, approximately one week |
+| History retention | 60 seconds |
 | EVM fork | Shanghai |
 | Chain ID | 7777 |
 
 Listeners must use loopback addresses in the current development implementation.
 
-| Path under `.sfc-v3/` | Purpose |
+| Path under `~/.superfrontierchain/node/` | Purpose |
 | --- | --- |
-| `config.capnp`, `genesis.capnp` | Node configuration and chain initialization |
+| `config.jsonl` | Editable node configuration, one top-level field per line |
+| `genesis.capnp` | Binary chain initialization |
 | `peer-cert.der`, `peer-key.der` | Local TLS identity; keep the private key private |
 | `data/rocksdb/` | Authoritative state, history, indexes, and native WAL |
-| `data/history/*.capnp` | Recoverable hourly block-history projection |
+| `data/history/*.capnp` | Recoverable block-history projection (60-second segments by default) |
 | `node.log` | Readable node/GPU diagnostics |
 | `data/logs/node.capnp` | Structured binary events, indexed in SQLite |
 | `service.log` | Python service diagnostics |
@@ -121,12 +123,13 @@ from RocksDB's durable journal and the block-history projection.
 The generated configuration enables pruning:
 
 ```json
-{"retention":{"mode":"pruned","seconds":604800}}
+{"retention":{"mode":"pruned","seconds":60}}
 ```
 
 The cutoff follows committed block time. Old blocks and receipt indexes expire;
-current balances, code, and contract storage remain. Hourly Cap’n Proto rotation may
-retain less than one extra hour in the boundary segment. Disk space is reclaimed
+current balances, code, and contract storage remain. Pruned history segments span
+`min(retention_seconds, 60)` seconds; the boundary segment may temporarily retain
+less than one extra segment. Archive segments span one hour. Disk space is reclaimed
 through RocksDB compaction rather than immediately upon logical deletion.
 
 To create an archive home:
@@ -150,7 +153,7 @@ make testnet
 
 The Python supervisor starts one sequencer and three followers. Default RPC ports
 are 8545–8548; HTTP/3 UDP ports are 26656–26659. Each node has its own data and
-`node.log` under `.sfc-testnet-v3/node-N/`. Submit transactions to node 0. Followers
+`node.log` under `~/.superfrontierchain/testnet/node-N/`. Submit transactions to node 0. Followers
 replay its blocks over certificate-pinned HTTP/3. Ctrl-C shuts down the whole group.
 The supervisor restarts crashed processes with a bounded retry budget.
 

@@ -34,6 +34,25 @@ fn wait(mut condition: impl FnMut() -> bool) {
 }
 
 #[test]
+fn indexer_catches_up_while_execution_mutex_is_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let node = Arc::new(Mutex::new(
+        Node::open(config, Application::default()).unwrap(),
+    ));
+    let _index = Indexer::start(node.clone(), data.clone()).unwrap();
+    let mut execution = node.lock().unwrap();
+    execution.submit(&common::transfer(0).raw).unwrap();
+    execution.produce(1_000_002).unwrap();
+    // Keep the guard until after catch-up: reads and validation must use Store's
+    // snapshot, without waiting for this execution lock to become available.
+    wait(|| query(&data, "blocks", "")["indexedHeight"] == 1);
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    drop(execution);
+}
+
+#[test]
 fn catchup_batches_roll_back_rows_and_cursors_together_and_resume() {
     let dir = tempfile::tempdir().unwrap();
     let config = common::config(dir.path());
@@ -107,7 +126,13 @@ fn wal_search_restart_and_concurrent_reader_preserve_exact_records() {
         .append(true)
         .open(data.join("logs/node.capnp"))
         .unwrap();
-    sfc::codec::write_record(&mut log, &sfc::codec::to_vec(&json!({"timestamp_ms":1,"level":"info","event":"recovery_complete","fields":{"message":"worker healthy <script>"}})).unwrap()).unwrap();
+    // These records test replay, not expiration. Ancient timestamps made the
+    // assertions race the indexer's once-per-second retention cleanup.
+    let log_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    sfc::codec::write_record(&mut log, &sfc::codec::to_vec(&json!({"timestamp_ms":log_time,"level":"info","event":"recovery_complete","fields":{"message":"worker healthy <script>"}})).unwrap()).unwrap();
     let tx = common::transfer(0);
     let hash = hex_hash(&tx.hash);
     {
@@ -157,8 +182,10 @@ fn wal_search_restart_and_concurrent_reader_preserve_exact_records() {
     let mut frame = Vec::new();
     sfc::codec::write_record(
         &mut frame,
-        &sfc::codec::to_vec(&json!({"timestamp_ms":2,"level":"warn","event":"restart_check"}))
-            .unwrap(),
+        &sfc::codec::to_vec(
+            &json!({"timestamp_ms":log_time + 1,"level":"warn","event":"restart_check"}),
+        )
+        .unwrap(),
     )
     .unwrap();
     log.write_all(&frame[..4]).unwrap();
@@ -266,4 +293,48 @@ fn explorer_preserves_empty_blocks_and_pages_transactions_without_gaps() {
         next = page["next"].clone();
     }
     assert_eq!(positions, vec![(2, 0), (1, 1), (1, 0)]);
+}
+
+#[test]
+fn short_retention_removes_indexed_transactions_and_receipts() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = common::config(dir.path());
+    config.retention = sfc::config::Retention::Pruned { seconds: 2 };
+    let data = config.data_dir.clone();
+    let node = Arc::new(Mutex::new(
+        Node::open(config, Application::default()).unwrap(),
+    ));
+    let _index = Indexer::start(node.clone(), data.clone()).unwrap();
+    {
+        let mut n = node.lock().unwrap();
+        n.submit(&common::transfer(0).raw).unwrap();
+        n.produce(1_000_001).unwrap();
+    }
+    wait(|| query(&data, "transactions", "")["indexedTransactions"] == 1);
+    {
+        let mut n = node.lock().unwrap();
+        n.produce(1_000_004).unwrap();
+        n.store.maintain().unwrap();
+    }
+    wait(|| {
+        query(&data, "blocks", "")["indexedHeight"] == 2
+            && query(&data, "transactions", "")["indexedTransactions"] == 0
+    });
+    let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM transactions", [], |r| r
+            .get::<_, u64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row("SELECT min(height) FROM blocks", [], |r| r.get::<_, u64>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "ok"
+    );
 }

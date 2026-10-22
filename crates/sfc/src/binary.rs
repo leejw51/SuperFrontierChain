@@ -8,7 +8,10 @@ use anyhow::{ensure, Result};
 use bytes::Bytes;
 use capnp::message::{Builder, Reader, ReaderOptions, ReaderSegments};
 use sha3::{Digest, Keccak256};
-use std::{collections::BTreeMap, sync::OnceLock};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, OnceLock},
+};
 
 pub struct Segment<'a>(pub &'a [u8]);
 impl ReaderSegments for Segment<'_> {
@@ -72,7 +75,8 @@ fn digest(domain: &[u8], bytes: &[u8]) -> Hash {
 #[derive(Clone)]
 pub struct Block {
     bytes: Bytes,
-    hash: OnceLock<Hash>,
+    // Clones made before the first hash must share its eventual result too.
+    hash: Arc<OnceLock<Hash>>,
 }
 impl PartialEq for Block {
     fn eq(&self, other: &Self) -> bool {
@@ -92,7 +96,7 @@ impl Block {
     pub fn from_bytes(bytes: impl Into<Bytes>) -> Result<Self> {
         let block = Self {
             bytes: bytes.into(),
-            hash: OnceLock::new(),
+            hash: Arc::default(),
         };
         let message = block.read()?;
         let root = message.get_root::<wire::block::Reader>()?;
@@ -128,6 +132,23 @@ impl Block {
     }
     /// Encode newly produced execution results without cloning their payloads.
     pub fn build_from(draft: &BlockDraft) -> Result<Self> {
+        // Validate domain constraints before allocating the arena. Fixed-width
+        // hashes and Rust strings already guarantee the widths/UTF-8 checked by
+        // from_bytes; write_receipt validates hexadecimal log data.
+        ensure!(
+            draft.transactions.len() == draft.receipts.len()
+                && draft.transactions.len() <= crate::types::MAX_BLOCK_TRANSACTIONS,
+            "invalid block record count"
+        );
+        let mut size = 0usize;
+        for tx in &draft.transactions {
+            ensure!(
+                tx.len() <= crate::types::MAX_TX_BYTES,
+                "transaction too large"
+            );
+            size += tx.len();
+        }
+        ensure!(size <= crate::types::MAX_BLOCK_BYTES, "block too large");
         let mut message = Builder::new_default();
         let mut root = message.init_root::<wire::block::Builder>();
         root.set_chain_id(draft.chain_id);
@@ -145,7 +166,19 @@ impl Block {
         for (i, receipt) in draft.receipts.iter().enumerate() {
             write_receipt(receipts.reborrow().get(i as u32), receipt)?;
         }
-        Self::from_bytes(canonical(message)?)
+        // set_root_canonical guarantees the wire layout. External bytes still
+        // go through the complete canonical/structural validation in from_bytes.
+        let bytes = canonical(message)?;
+        // Very large receipt/log trees can exhaust the external reader's
+        // traversal budget across its validation passes. Keep that check for
+        // large records so we never produce a block that imports would reject.
+        if bytes.len() > crate::codec::MAX_RECORD_BYTES / 8 {
+            return Self::from_bytes(bytes);
+        }
+        Ok(Self {
+            bytes,
+            hash: Arc::default(),
+        })
     }
     pub fn read(&self) -> Result<Reader<Segment<'_>>> {
         reader(&self.bytes)
@@ -317,9 +350,21 @@ pub fn read_receipt(r: wire::receipt::Reader<'_>) -> Result<Receipt> {
     })
 }
 pub fn receipt_bytes(r: wire::receipt::Reader<'_>) -> Result<Bytes> {
-    let mut message = Builder::new_default();
-    message.set_root(r)?;
-    canonical(message)
+    let words = r
+        .total_size()?
+        .word_count
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("canonical message size overflow"))?;
+    ensure!(
+        words <= crate::codec::MAX_RECORD_BYTES as u64 / 8,
+        "canonical message too large"
+    );
+    let mut message =
+        Builder::new(capnp::message::HeapAllocator::new().first_segment_words(words.try_into()?));
+    // Copy directly from the borrowed block reader into its canonical arena.
+    // The indexer does not need an intermediate mutable receipt message.
+    message.set_root_canonical(r)?;
+    Ok(Bytes::from_owner(CanonicalMessage(message)))
 }
 fn write_map(
     mut out: capnp::struct_list::Builder<'_, wire::text_entry::Owned>,
@@ -501,4 +546,33 @@ pub fn indexed_header_value(bytes: &[u8]) -> Result<serde_json::Value> {
     Ok(
         serde_json::json!({"height":h.get_height(),"hash":h.get_hash()?.to_str()?,"timestamp":h.get_timestamp(),"parentHash":h.get_parent_hash()?.to_str()?,"stateRoot":h.get_state_root()?.to_str()?,"transactions":h.get_transactions(),"gasUsed":if h.get_has_gas_used(){Some(h.get_gas_used())}else{None}}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clones_share_hash_computed_after_clone_on_another_thread() {
+        let block = Block::build(BlockDraft {
+            chain_id: 1,
+            height: 1,
+            timestamp: 1,
+            parent_hash: [0; 32],
+            state_root: [1; 32],
+            transactions: vec![],
+            receipts: vec![],
+        })
+        .unwrap();
+        let copy = block.clone();
+        assert!(block.hash.get().is_none());
+        let expected = digest(b"sfc/block/v3/capnp", block.as_bytes());
+        assert_eq!(
+            std::thread::spawn(move || copy.hash()).join().unwrap(),
+            expected
+        );
+        // Reading the original must reuse work done by the previously made clone.
+        assert_eq!(block.hash.get(), Some(&expected));
+        assert_eq!(block.hash(), expected);
+    }
 }

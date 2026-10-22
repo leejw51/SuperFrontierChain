@@ -1,0 +1,274 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Super Frontier Chain — architecture, protocol and measured performance."><title>SFC protocol · SFC</title><style>
+:root{color-scheme:dark;--bg:#080e19;--panel:#111b2a;--line:#243447;--ink:#eaf2fa;--muted:#a5b5c7;--mint:#8af0c3}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--mint);text-underline-offset:4px}a:hover{color:white}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}aside{position:fixed;inset:0 auto 0 0;width:270px;padding:30px 24px;border-right:1px solid var(--line);overflow:auto;background:#0b1320}aside img{width:220px;display:block;margin:0 0 22px}aside .caption,.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;font-weight:700;color:var(--mint)}nav a{display:block;text-decoration:none;color:var(--muted);font-size:13px;line-height:1.5;padding:9px 0}nav a.sub{padding-left:14px;font-size:12px}nav a:hover{color:var(--mint)}main{max-width:1220px;margin-left:270px;padding:60px clamp(24px,5vw,84px) 100px}header{border-bottom:1px solid var(--line);padding-bottom:36px;margin-bottom:40px}header .logo{width:min(560px,100%);display:block;margin-bottom:24px}.actions{display:flex;gap:12px;flex-wrap:wrap}.actions a{font-size:12px;border:1px solid var(--line);padding:6px 13px;border-radius:8px;text-decoration:none}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.04em;line-height:1.15;margin:12px 0 24px}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em;margin-top:58px;padding-top:12px}h3{font-size:19px;margin-top:30px}p,li{color:var(--muted)}strong{color:var(--ink)}li{padding:3px 0}code{font: .86em ui-monospace,SFMono-Regular,Consolas,monospace;background:#172335;border:1px solid #223349;border-radius:5px;padding:2px 5px;overflow-wrap:anywhere}pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;overflow:auto;line-height:1.55}pre code{background:none;border:0;padding:0;overflow-wrap:normal}.table-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:24px 0}table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.6}th{text-align:left;background:#192738;color:var(--mint)}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}td{color:var(--muted)}tr:last-child td{border-bottom:0}tr:hover td{background:#132033}.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:9px}.edge{display:grid;grid-template-columns:1fr .9fr 1fr;align-items:center;gap:12px;font-size:12px;line-height:1.5}.node{padding:10px 12px;border:1px solid #30465a;border-radius:8px;color:var(--ink);background:#0e1927}.arrow{text-align:center;color:var(--mint);font-size:11px}.arrow b{display:block;font-size:20px;line-height:1.2}details{margin-top:16px}summary{color:var(--mint);font-size:12px;cursor:pointer}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--muted)}.skip{position:absolute;top:-90px}.skip:focus{top:10px;left:290px;background:var(--panel);padding:10px;z-index:10}@media(max-width:900px){aside{position:static;width:auto;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}aside img{width:165px;margin:0}aside nav,aside .caption{display:none}main{margin:0;padding:30px 22px 60px}h2{margin-top:38px}.edge{grid-template-columns:1fr 70px 1fr;gap:6px}.flow{padding:12px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{aside,.actions,.skip{display:none}main{margin:0;padding:0;max-width:none}body{background:white;color:#111}p,li,td,footer{color:#333}h1,h2,h3,strong{color:#111}a{color:#175d49}pre,.flow,.node,th{background:#f4f7f8;color:#111}.table-scroll,pre,.flow{break-inside:avoid}header .logo{width:300px}}</style></head><body><a class="skip" href="#content">Skip to content</a><aside><a href="SPECIFICATION.html"><img src="assets/sfc-logo.png" alt="SFC — Super Frontier Chain"></a><p class="caption">On this page</p><nav aria-label="Table of contents"><a class="" href="#interfaces">Interfaces</a><a class="" href="#http-3-session">HTTP/3 session</a><a class="" href="#configuration">Configuration</a><a class="" href="#peer-methods">Peer methods</a><a class="sub" href="#wire-types">Wire types</a><a class="" href="#synchronization">Synchronization</a><a class="" href="#resource-limits">Resource limits</a><a class="" href="#ethereum-json-rpc">Ethereum JSON-RPC</a><a class="" href="#runtime-records">Runtime records</a><a class="" href="#verification">Verification</a><a class="sub" href="#binary-bulk-submission">Binary bulk submission</a></nav></aside><main id="content"><header><img class="logo" src="assets/sfc-logo.png" alt="Super Frontier Chain"><div class="eyebrow">Engineering documentation / SFC</div><p>Architecture. Execution. Evidence.</p><div class="actions"><a href="PROTOCOL.md">Markdown source ↗</a><a href="SPECIFICATION.html">Specification</a><a href="EXECUTION-ALLOCATION-BENCHMARK.html">Benchmarks</a><a href="ETHEREUM.html">Ethereum compatibility</a></div></header><article><h1 id="sfc-protocol">SFC protocol</h1><p>This document describes the current development implementation. The canonical
+Cap’n Proto schema is <a href="../crates/sfc/schema/chain.capnp">chain.capnp</a>; networking is
+implemented in <a href="../crates/sfc/src/network.rs">network.rs</a>.</p>
+<h2 id="interfaces">Interfaces</h2><div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Interface</th>
+<th>Default endpoint</th>
+<th>Encoding</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Ethereum RPC</td>
+<td>HTTP <code>127.0.0.1:8545/</code></td>
+<td>JSON-RPC 2.0</td>
+<td>Wallets, transactions, contract calls</td>
+</tr>
+<tr>
+<td>Default peer RPC</td>
+<td>TCP <code>127.0.0.1:26656</code></td>
+<td>Cap’n Proto RPC</td>
+<td>Status, submission, block sync</td>
+</tr>
+<tr>
+<td>Alternative peer RPC</td>
+<td>HTTP/3 <code>127.0.0.1:26656/sfc/rpc</code> over UDP</td>
+<td>Cap’n Proto RPC</td>
+<td>The same sync service over QUIC/TLS</td>
+</tr>
+<tr>
+<td>Dashboard</td>
+<td>HTTP <code>/dashboard</code></td>
+<td>HTML</td>
+<td>Local statistics UI</td>
+</tr>
+<tr>
+<td>Statistics</td>
+<td>HTTP <code>/dashboard/stats</code></td>
+<td>Cap’n Proto <code>Value</code></td>
+<td>Read-only node statistics</td>
+</tr>
+</tbody></table></div>
+<p>All serving addresses are restricted to loopback. New peers and benchmark runs
+default to <code>tcp</code>. Both listeners start together; when <code>capnp_listen</code> is absent,
+the TCP listener uses the same address/port number as the UDP peer listener.
+An explicit <code>capnp_listen</code> selects a separate TCP port. The <code>http3</code> and <code>tcp</code>
+transports share one service and schema. Existing serialized transport selections
+are preserved. The Ethereum interface remains HTTP JSON-RPC 2.0.</p>
+<h2 id="http-3-session">HTTP/3 session</h2><ol>
+<li>Connect using QUIC with TLS and ALPN <code>h3</code>.</li>
+<li>Validate the server certificate against the configured certificate trust store
+and verify <code>server_name</code>. Generated self-signed certificates use <code>localhost</code>.</li>
+<li>Send <code>POST /sfc/rpc</code> with <code>Content-Type: application/x-capnp</code>.</li>
+<li>The server returns HTTP 200 and the same content type before request completion.</li>
+<li>Use the request and response bodies as a full-duplex Cap’n Proto RPC stream.</li>
+<li>Bootstrap the two-party server capability as <code>Peer</code>.</li>
+</ol>
+<p>Wrong methods, paths, or content types receive HTTP 404. This is a streaming RPC
+session, not an independent HTTP request for every Cap’n Proto method. Client
+certificates are not required; the current design authenticates the server.</p>
+<p>Quinn handles QUIC, rustls handles TLS, and h3/h3-quinn handle HTTP/3 framing.
+A 256 KiB in-memory duplex bridge propagates transport backpressure. Server RPC
+sessions are bounded to 60 seconds; the follower reconnects after disconnection.
+Status and block-batch calls have five-second client deadlines. Sync retries wait
+one second; an idle follower polls every 100 ms.</p>
+<h2 id="configuration">Configuration</h2><p>A follower uses a <code>sync_peer</code> object in its editable <code>config.jsonl</code>. Use a text
+editor or the Python adapter; see <a href="CAPNP-V3.html">v3 tooling</a>. Its fields are <code>transport</code>
+(<code>tcp</code> for new peers), <code>address</code>, <code>server_name</code>, and <code>certificate</code>.</p>
+<p>All nodes must share the same genesis. Initialize each node&#39;s own identity and data
+home, then copy the leader&#39;s genesis before starting a new follower. Relative
+certificate paths are resolved against the config file&#39;s directory.</p>
+<p>For a separate TCP port, set <code>&quot;capnp_listen&quot;: &quot;127.0.0.1:26657&quot;</code> on the server
+and set the follower&#39;s transport to <code>&quot;tcp&quot;</code> and address to that TCP listener. Keep
+<code>server_name</code> and <code>certificate</code> fields in the configuration; TCP ignores them.
+Direct TCP is unencrypted and both client and server addresses must be loopback.
+For HTTP/3, explicitly set <code>&quot;transport&quot;: &quot;http3&quot;</code> and use the UDP peer address
+with the server&#39;s pinned certificate. There is no silent transport fallback.</p>
+<p>Both sync transports carry the same canonical Cap’n Proto block bytes retrieved
+from storage. Ethereum RLP transaction bytes remain inside those blocks; JSON
+encoding is confined to the Ethereum RPC boundary.</p>
+<h2 id="peer-methods">Peer methods</h2><div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Ordinal</th>
+<th>Input</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>status</code></td>
+<td>0</td>
+<td>None</td>
+<td><code>Status</code></td>
+</tr>
+<tr>
+<td><code>submitTransaction</code></td>
+<td>1</td>
+<td>Raw signed transaction bytes</td>
+<td>Transaction hash bytes</td>
+</tr>
+<tr>
+<td><code>getBlock</code></td>
+<td>2</td>
+<td>Height (<code>UInt64</code>)</td>
+<td><code>found</code> flag and <code>Block</code></td>
+</tr>
+<tr>
+<td><code>getBlocks</code></td>
+<td>3</td>
+<td>Start height and limit</td>
+<td>Ordered list of <code>Block</code></td>
+</tr>
+<tr>
+<td><code>getEncodedBlocks</code></td>
+<td>4</td>
+<td>Start height and limit</td>
+<td>Canonical storage block segments as <code>List(Data)</code></td>
+</tr>
+</tbody></table></div>
+<p><code>getBlock</code> returns <code>found=false</code> for missing/pruned heights. <code>getBlocks</code> starts at
+the requested height, stops at a missing height, and clamps the requested limit to
+64. Limit zero returns an empty list. Raw transaction bytes across a returned batch
+are bounded near 2 MiB. Server validation failures surface as Cap’n Proto errors.</p>
+<p>Submission means mempool admission, not finality or durable inclusion. Followers
+reject transaction submission; clients must submit to the sequencer.</p>
+<h3 id="wire-types">Wire types</h3><div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Fields</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Status</code></td>
+<td><code>protocolVersion: UInt32</code>, <code>chainId: UInt64</code>, <code>height: UInt64</code>, <code>blockHash: Data</code>, <code>earliestHeight: UInt64</code></td>
+</tr>
+<tr>
+<td><code>Block</code></td>
+<td><code>chainId: UInt64</code>, <code>height: UInt64</code>, <code>timestamp: UInt64</code>, <code>parentHash: Data</code>, <code>stateRoot: Data</code>, <code>transactions: List(Data)</code></td>
+</tr>
+</tbody></table></div>
+<p>Current status protocol version is 3. Block timestamps are Unix seconds; adjacent
+100 ms blocks can have equal timestamps. Parent and state hashes must be 32 bytes.
+Transactions remain Ethereum-encoded signed bytes carried as opaque <code>Data</code>.
+Production sync uses <code>getEncodedBlocks</code>, including receipts. The follower regenerates
+all execution results and checks the complete canonical bytes before committing.
+The older <code>getBlock</code>/<code>getBlocks</code> inspection methods omit receipts. A response is
+limited to 64 blocks and targets 2 MiB; one larger bounded block can be returned
+alone. Readers allow the storage record limit plus RPC framing overhead.</p>
+<p>The schema also defines <code>Vote</code> with chain, height, round, phase, block hash,
+validator, and signature. It is not exposed through an active consensus networking
+method. Schema ordinals are wire identities: do not renumber existing fields or
+methods when extending the protocol.</p>
+<h2 id="synchronization">Synchronization</h2><p>A follower connects to its configured peer, reads status, and checks protocol
+version and chain ID. If the required next height predates <code>earliestHeight</code>, sync
+fails with a request to use an archive peer. At equal height, head hashes must
+match. A behind upstream does not roll back the follower.</p>
+<p>When behind, the follower requests batches beginning at its current height + 1.
+For every block it checks chain ID, consecutive height, parent hash, payload limits,
+and signed transactions. It re-executes transactions and compares the computed
+state root before committing. Invalid ancestry, signatures, or roots are rejected.
+Each accepted block commits independently: a failure later in a batch does not
+undo earlier valid committed blocks. Catch-up resumes from the last committed head.</p>
+<p>There is no automatic reorganization, multi-peer selection, snapshot import,
+state-sync checkpoint, or validator finality certificate in this path. Followers
+verify execution of their configured sequencer&#39;s history; this is not distributed
+Byzantine consensus.</p>
+<h2 id="resource-limits">Resource limits</h2><div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Resource</th>
+<th align="right">Limit</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Signed transaction</td>
+<td align="right">128 KiB</td>
+</tr>
+<tr>
+<td>Block transactions</td>
+<td align="right">4096 / 2 MiB raw bytes</td>
+</tr>
+<tr>
+<td>Pending raw transactions</td>
+<td align="right">64 MiB; default 16384 entries</td>
+</tr>
+<tr>
+<td>HTTP JSON-RPC body</td>
+<td align="right">5 MiB</td>
+</tr>
+<tr>
+<td>JSON-RPC batch</td>
+<td align="right">4,096 entries</td>
+</tr>
+<tr>
+<td>Peer connections per transport listener</td>
+<td align="right">32</td>
+</tr>
+<tr>
+<td>Concurrent QUIC bidirectional streams per connection</td>
+<td align="right">8</td>
+</tr>
+<tr>
+<td>Cap’n Proto traversal</td>
+<td align="right">2 × 1024 × 1024 words</td>
+</tr>
+<tr>
+<td>Cap’n Proto nesting</td>
+<td align="right">32</td>
+</tr>
+<tr>
+<td>Block response</td>
+<td align="right">Up to 64 blocks</td>
+</tr>
+</tbody></table></div>
+<p>These are implementation bounds, not proof of resistance to arbitrary public
+network traffic.</p>
+<h2 id="ethereum-json-rpc">Ethereum JSON-RPC</h2><p>Requests use JSON-RPC 2.0 over HTTP POST. Batches return responses in input order;
+valid notifications execute without a reply, with HTTP 204 when no replies remain.
+An empty batch or a batch over 4,096 entries is invalid. Parse errors use <code>-32700</code>,
+invalid requests <code>-32600</code>, and unknown methods <code>-32601</code>.</p>
+<p>Supported transaction formats are protected legacy EIP-155 and EIP-1559 type 2.
+Execution uses Shanghai rules, a fixed zero base fee, and deterministic zero
+PREVRANDAO. State reads support <code>latest</code>; block lookups also support <code>earliest</code>
+and explicit heights. Missing or pruned block/receipt lookups return null.</p>
+<p>See <a href="ETHEREUM.html">Ethereum compatibility</a> for the complete supported method list.
+<code>eth_syncing</code> and <code>net_peerCount</code> currently return fixed values; they are not peer
+health or lag telemetry. SFC uses its own commitments, not Ethereum trie proofs.</p>
+<h2 id="runtime-records">Runtime records</h2><p>Runtime records use <a href="../crates/sfc/schema/runtime.capnp">runtime.capnp</a>.
+<code>Value</code> is a recursive typed union with sorted object keys, not a JSON string.
+Genesis and dashboard replies contain standard unpacked Cap’n Proto messages.
+Node configuration and the supervisor network manifest use JSONL. History, structured logs, benchmark streams and IPC prefix
+each message with its UInt64 little-endian byte length. GPU IPC uses dedicated
+<code>RecoveryRequest</code>/<code>RecoveryResponse</code> schemas with binary digest/signature/key fields.</p>
+<p>Structured events are stored in <code>data/logs/node.capnp</code>; human diagnostics go to
+stderr and the process manager&#39;s <code>node.log</code>. Segmented <code>history/*.capnp</code> is a
+recoverable projection of RocksDB. SQLite indexes raw transactions as BLOBs and
+Cap’n Proto block/receipt/log records, with separate SQL columns for search.</p>
+<p>Block hashing uses canonical Cap’n Proto segments and the <code>sfc/block/v3/capnp</code>
+domain. State roots use the <a href="MERKLE-TRIE.html">SFC Merkle Patricia trie</a>.
+Raw block segments are shared by storage and RPC; history adds length framing. Internal Rust
+structures and serde Value adapters remain in memory; this is not a zero-copy
+execution engine. Ethereum RLP and cryptographic preimages retain their prescribed
+binary encodings. Native database files and TLS certificates retain native formats.</p>
+<h2 id="verification">Verification</h2><pre><code>make test-http3
+make test-rpc
+make test-sync</code></pre><p>Tests cover actual HTTP/3 negotiation, TLS identity rejection, routing, concurrent
+RPC calls, bounded batches, transaction submission, replay, divergent/pruned peers,
+and process restarts. See <a href="ARCHITECTURE.html">architecture</a> for persistence semantics.</p>
+<h3 id="binary-bulk-submission">Binary bulk submission</h3><p><code>Peer.submitTransactions @5</code> is shared by direct Cap&#39;n Proto RPC/TCP and the
+HTTP/3 <code>/sfc/rpc</code> tunnel. It accepts <code>List(Data)</code> containing original signed RLP
+transactions, with no JSON or hexadecimal encoding on the wire. Batches contain
+1–4,096 transactions, at most 2 MiB total and 128 KiB per transaction. Invalid
+batch bounds reject the entire call before admission. Each result is an ordered
+union of a transaction hash or an error; invalid individual transactions do not
+prevent subsequent valid entries from being admitted. Duplicate pending
+transactions retain the existing idempotent hash response. Followers reject writes.</p>
+<p>Verification runs on a blocking worker outside the node state mutex, using the
+configured CPU/GPU/HYBRID verifier. Ordered admission acquires the mutex only after
+verification. The RPC reader&#39;s bytes are copied once into owned <code>Bytes</code> at this
+worker boundary. This is not an end-to-end zero-copy claim. An acknowledgement
+means mempool admission, not commitment. <code>committedTransaction @7</code> checks durable
+receipts; <code>account @6</code> reads committed nonce/balance. <code>verification @8</code> exposes
+runtime/counters without JSON serialization. Existing method ordinals are unchanged;
+this additive network API does not change stored blocks or chain hashes.</p>
+<p>The Rust benchmark uses these capabilities for submission, commit polling, account
+checks and GPU counters. A persistent connection is reused per node. HTTP/3 uses
+the same Cap&#39;n Proto RPC method and payload over QUIC/TLS; direct TCP remains
+loopback-only and unencrypted. Compare these concrete implementations rather than
+interpreting the measurements as a universal comparison of serialization formats.</p>
+</article><footer>Super Frontier Chain · Generated from PROTOCOL.md · Rebuild: npm run build:docs<br>Static, offline-readable documentation. No external scripts, fonts or trackers.</footer></main></body></html>

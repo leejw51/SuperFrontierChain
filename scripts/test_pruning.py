@@ -16,7 +16,7 @@ def main():
             network.start()
             network.close()
             for i, retention in enumerate([{'mode': 'pruned', 'seconds': 3}, {'mode': 'archive'}]):
-                path = home / f'node-{i}/config.capnp'
+                path = home / f'node-{i}/config.jsonl'
                 config = codec.loads(path.read_bytes())
                 config['retention'] = retention
                 path.write_bytes(codec.dumps(config))

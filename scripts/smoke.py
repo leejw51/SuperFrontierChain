@@ -57,7 +57,7 @@ def main():
         configs = []
         for home in homes:
             subprocess.run([BIN, "init", "--home", home], check=True, capture_output=True)
-            config = codec.loads((home / "config.capnp").read_bytes())
+            config = codec.loads((home / "config.jsonl").read_bytes())
             config.update(rpc_listen=f"127.0.0.1:{port()}", peer_listen=f"127.0.0.1:{port(True)}", block_interval_ms=500)
             if transport == "tcp":
                 config["capnp_listen"] = f"127.0.0.1:{port()}"
@@ -66,7 +66,7 @@ def main():
         address = configs[0]["capnp_listen" if transport == "tcp" else "peer_listen"]
         configs[1]["sync_peer"] = {"transport": transport, "address": address, "server_name": "localhost", "certificate": configs[0]["tls_cert"]}
         for home, config in zip(homes, configs):
-            (home / "config.capnp").write_bytes(codec.dumps(config))
+            (home / "config.jsonl").write_bytes(codec.dumps(config))
         urls = ["http://" + c["rpc_listen"] for c in configs]
         processes = []
         logs = []
@@ -74,7 +74,7 @@ def main():
             for home in homes:
                 log = (home / "node.log").open("w+")
                 logs.append(log)
-                processes.append(subprocess.Popen([BIN, "run", "--config", home / "config.capnp"], stdout=log, stderr=log))
+                processes.append(subprocess.Popen([BIN, "run", "--config", home / "config.jsonl"], stdout=log, stderr=log))
                 wait(lambda: rpc(urls[len(processes)-1], "eth_chainId") == "0x1e61", "RPC startup")
             with urllib.request.urlopen(urls[0] + "/dashboard", timeout=3) as response:
                 assert response.status == 200
@@ -114,7 +114,7 @@ def main():
             stop(processes[1])
             # Restart the leader and confirm history survived; follower will resume too.
             for i, home in enumerate(homes):
-                processes[i] = subprocess.Popen([BIN, "run", "--config", home / "config.capnp"], stdout=logs[i], stderr=logs[i])
+                processes[i] = subprocess.Popen([BIN, "run", "--config", home / "config.jsonl"], stdout=logs[i], stderr=logs[i])
                 wait(lambda i=i: int(rpc(urls[i], "eth_blockNumber"), 16) > height, "restart/catch-up")
             compare = hex(height)
             assert rpc(urls[0], "eth_getBlockByNumber", [compare, False]) == rpc(urls[1], "eth_getBlockByNumber", [compare, False])

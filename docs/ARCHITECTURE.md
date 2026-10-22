@@ -1,6 +1,6 @@
 # SFC architecture
 
-SuperFroniterChain is an MIT-licensed Rust blockchain framework. Its current runtime
+Super Frontier Chain is an MIT-licensed Rust blockchain framework. Its current runtime
 is a development sequencer with independently replaying followers. It executes
 Ethereum contracts using REVM and synchronizes through Cap’n Proto RPC, with TCP
 as the default loopback transport and HTTP/3 for TLS/QUIC peers. See [quickstart](QUICKSTART.md) for operating commands and
@@ -12,13 +12,13 @@ evidence, production design gaps, the CometBFT/SDK direction and MLX assessment.
 ```text
 Ethereum clients -- HTTP JSON-RPC --> bounded admission --> pending EVM cache
                                                            |
-                                                10 ms block scheduler
+                                                100 ms block scheduler
                                                            |
                                                single-pass execution
                                                            |
                                                atomic RocksDB commit
                                                            |
-                                            durable hourly Cap’n Proto projection
+                                            recoverable Cap’n Proto projection
 
 Follower -- TLS + QUIC + HTTP/3 -- Cap'n Proto RPC -- block batches
      |                                                   |
@@ -33,16 +33,16 @@ account/code/storage conversion.
 transactions reject a block; invalid pending entries are dropped during selection.
 `journal`: shared explicit RocksDB WAL and synchronous-write policy, automatic WAL
 flush, paranoid checks, and absolute-consistency recovery for state and signing records.
-`storage`: Cap’n Proto records, atomic synchronous batches, indexed receipts, seven-day
-history pruning, hourly Cap’n Proto projection/recovery. Account writes are differential.
+`storage`: Cap’n Proto records, atomic synchronous batches, indexed receipts, 60-second default
+history pruning, segmented Cap’n Proto projection/recovery. Account writes are differential.
 Committed head bytes/hash are cached only after a successful durable batch write;
 the cached bytes also supply the Cap’n Proto projection.
 `consensus`: Ed25519 votes, weighted strict >2/3 certificates, equivocation checks,
 round locks and process-locked persistent anti-double-sign records.
 `network`: typed capability RPC inside an HTTP/3 full-duplex POST body. Quinn handles
 QUIC; rustls verifies TLS certificates; h3 provides actual HTTP/3 framing. This is
-not raw QUIC mislabeled as HTTP/3. A bounded duplex buffer propagates backpressure. Optional direct TCP uses the same
-service and is loopback-only, unencrypted, and disabled by default.
+not raw QUIC mislabeled as HTTP/3. A bounded duplex buffer propagates backpressure. Default direct TCP uses the same
+service and is loopback-only and unencrypted.
 `node`: explicit development sequencer or replaying follower.
 `rpc`: bounded HTTP JSON-RPC requests/batches and read-only EVM simulation.
 
@@ -52,9 +52,9 @@ The Rust node owns execution, admission, persistence, HTTP JSON-RPC, peer RPC, a
 the bundled dashboard. Python is process tooling only. A current-thread Tokio
 runtime with a LocalSet runs Cap’n Proto's local futures and asynchronous network
 I/O. Blocking execution/storage work is dispatched to blocking tasks where used;
-shared mutable node state is guarded by a mutex. Some peer service handlers read
-storage or admit transactions synchronously under that lock, so contention remains
-a performance consideration.
+shared mutable node state is guarded by a mutex. Ordered admission and state mutation still use that lock. Peer block reads use
+bounded blocking workers and shared storage snapshots; SQLite catch-up also reads
+snapshots without acquiring the execution mutex.
 
 The selected CPU/GPU/HYBRID backend handles independent transaction signature
 recovery (GPU by default). CPU parsing uses ordered Rayon work; all modes preserve
@@ -148,11 +148,11 @@ resource bounds, not a complete public-network DoS defense. Listeners are local 
 
 ## Remaining scaling work
 
-State commitments still serialize the complete ordered state. EVM preparation loads
-current accounts into an in-memory cache and block isolation clones state. Startup
+State commitments update an incremental Merkle Patricia trie. EVM preparation,
+change detection and world-map cloning still scale with current state size. Startup
 projection repair is linear in retained history and currently builds it in memory.
-Large states and long archives therefore need incremental authenticated state and
-streaming repair before production. Cap’n Proto is not an independent import format yet.
+Large states and long archives still need reduced state copying and streaming
+repair. Cap’n Proto is not an independent import format yet.
 The selected verifier recovers independent transaction signatures. JSON-RPC batch
 authentication runs without holding the state mutex; ordered admission, EVM execution
 and state queries still use it. Imported blocks verify signatures in parallel before
@@ -168,18 +168,18 @@ indexes share one atomic WriteBatch and one WAL synchronization; there is no
 per-transaction journal sync. Cap’n Proto remains a recoverable history projection, not
 the transaction journal.
 
-History appends reuse an open hourly file and borrow the committed block bytes.
-Maintenance syncs the projection when 100 ms has elapsed or at least 8 MiB has
-been appended, and also at segment rotation and clean close. The interval is
-checked during maintenance, not by a background timer; an idle projection may
-remain unsynced until the next maintenance call or close. A partial append is
+History appends reuse an open segment and borrow the committed block bytes.
+The projection syncs at segment rotation and clean close. Periodic projection
+fsyncs were removed after measurements showed contention with the durable WAL;
+[the investigation](SPECIFICATION.md#11-throughput-stall-investigation-and-follow-up-2026-10-22)
+records the evidence and remaining throughput variation. A partial append is
 truncated before retry. A crash may lose projection bytes, but restart rebuilds
 them from the already-synced retained RocksDB blocks. No consensus format or
 authoritative WAL policy changes are involved.
 
 WAL files are native binary `*.log` files in the RocksDB directory (`data/rocksdb`
 for the chain; the caller-selected directory for `DurableSigner`). RocksDB manages
-their rotation and removal after records reach SST files. The seven-day pruning
+their rotation and removal after records reach SST files. The configured pruning
 policy applies to logical chain history, not directly to WAL file ages. Archive
 mode preserves logical history without forcing RocksDB to retain obsolete WALs.
 
@@ -199,7 +199,7 @@ Reference: [RocksDB WAL recovery modes](https://github.com/facebook/rocksdb/wiki
 
 ## Retention lifecycle
 
-Pruning is enabled by default with a 604800-second window. Expiry uses the committed
+Pruning is enabled by default with a 60-second window. Expiry uses the committed
 head timestamp and is exclusive: a block exactly at the cutoff remains. The head
 is always retained. Pruning deletes historical block records and associated receipt
 indexes while keeping current account/code/storage state. EVM's recent block-hash
@@ -208,8 +208,9 @@ context remains part of current state.
 Pruning runs on open and after production/import. Large backlogs are deleted in
 WAL-synchronized batches bounded by 256 blocks or roughly 8 MiB of delete operations,
 checked after each block. A restart resumes from remaining records. Expired whole
-Cap’n Proto hours are removed; a boundary segment may contain less than one extra hour
-until rotation, and restart reconstructs the exact retained projection. RocksDB
+Cap’n Proto segments are removed; pruned segments span `min(retention_seconds, 60)`
+seconds and archive segments span one hour. A boundary segment may retain less than
+one extra segment until rotation, and restart reconstructs the exact retained projection. RocksDB
 compaction asynchronously reclaims physical space.
 
 Archive mode disables history pruning. Switching back to archive preserves only

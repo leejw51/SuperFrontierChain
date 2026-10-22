@@ -1,7 +1,8 @@
 .DEFAULT_GOAL := help
 CARGO ?= cargo
-DATA_DIR ?= .sfc-v3
-CONFIG ?= $(DATA_DIR)/config.capnp
+PERSIST_DIR ?= $(HOME)/.superfrontierchain
+DATA_DIR ?= $(PERSIST_DIR)/node
+CONFIG ?= $(DATA_DIR)/config.jsonl
 
 .PHONY: help doctor fetch build release schema fmt lint test test-journal check init run dev archive peer-status smoke erc20 integration bench clean
 help:
@@ -9,7 +10,7 @@ help:
 	@echo '  make              Show this help'
 	@echo '  make start        Build release and start a background node (auto-init new home)'
 	@echo '  make stop         Stop all blockchain processes belonging to this repository'
-	@echo '  make clearall     Stop nodes and delete repository .sfc* chain homes (including archives)'
+	@echo '  make clearall     Stop nodes and delete default chain homes and repository .sfc* archives'
 	@echo '  make stressstart  Python-supervised background release/GPU stress test'
 	@echo '  make run          Run release node in foreground'
 	@echo '  make testnet      Run a Python-supervised multi-node network in foreground'
@@ -26,7 +27,7 @@ help:
 	@echo '  Other: doctor fetch build release schema fmt lint test init archive dev run-log'
 	@echo '         peer-status smoke erc20 test-journal test-rpc test-http3 test-sync'
 	@echo '         test-pruning test-supervisor smoke-tcp all clean'
-	@echo '  Options: DATA_DIR=.sfc-v3 CONFIG=.sfc-v3/config.capnp NODES=4 CARGO=cargo'
+	@echo '  Options: PERSIST_DIR=~/.superfrontierchain CONFIG=<node>/config.jsonl NODES=4 CARGO=cargo'
 	@echo '  Dashboard: http://127.0.0.1:8545/dashboard (default RPC port)'
 doctor:
 	@command -v cargo
@@ -65,18 +66,18 @@ clean:
 	$(CARGO) clean
 
 # Preserve supervisor locks: deleting them could let concurrent starts bypass locking.
-# Only repository-local chain homes are removed; symlinks are never followed.
+# Remove repository-local and default persistence homes; skip symlink homes.
 .PHONY: clearall
 clearall: stop
 	@set -eu; \
-	for dir in "$(CURDIR)"/.sfc*; do \
+	for dir in "$(CURDIR)"/.sfc* "$(PERSIST_DIR)/node" "$(PERSIST_DIR)/stress" "$(PERSIST_DIR)/testnet"; do \
 		[ -d "$$dir" ] || continue; \
 		[ ! -L "$$dir" ] || continue; \
 		[ "$$dir" != "$(CURDIR)/.sfc-processes" ] || continue; \
 		printf 'Removing chain data: %s\n' "$$dir"; \
 		rm -rf -- "$$dir"; \
 	done; \
-	printf 'Repository chain data cleared. Custom homes outside .sfc* are unchanged.\n'
+	printf 'Repository chain data cleared. Other custom homes and supervisor locks are unchanged.\n'
 
 .PHONY: erc20 integration
 # JavaScript is test tooling only; node and execution runtime are Rust.
@@ -101,7 +102,7 @@ test-journal:
 
 PYTHON ?= python3
 NODES ?= 4
-TESTNET_DIR ?= .sfc-testnet-v3
+TESTNET_DIR ?= $(PERSIST_DIR)/testnet
 RPC_PORT ?= 8545
 PEER_PORT ?= 26656
 .PHONY: testnet test-supervisor
@@ -190,7 +191,7 @@ STRESS_INTERVAL ?= 10
 STRESS_THREADS ?= 12
 STRESS_SQLITE ?= on
 STRESS_BIND ?= 0.0.0.0
-STRESS_DIR ?= .sfc-stress-merkle-v1
+STRESS_DIR ?= $(PERSIST_DIR)/stress
 STRESS_REPORT ?= $(STRESS_DIR)/results.capnp
 .PHONY: stresstest stressstart
 STRESS_COMMAND = '$(CURDIR)/target/release/sfc-bench' run --binary '$(CURDIR)/target/release/sfc' \
@@ -282,3 +283,7 @@ bench-transports: release
 .PHONY: test-stress-signals
 test-stress-signals:
 	python3 scripts/test_stress_signals.py
+
+.PHONY: test-config-defaults
+test-config-defaults: release
+	python3 scripts/test_config_defaults.py

@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, VecDeque};
 pub struct Node {
     pub config: Config,
     pub genesis: Genesis,
-    pub store: Store,
+    pub store: std::sync::Arc<Store>,
     pub app: Application,
     pub verifier: std::sync::Arc<crate::verification::Verifier>,
     pending: VecDeque<Transaction>,
@@ -46,7 +46,7 @@ impl Node {
             config,
             verifier,
             genesis,
-            store,
+            store: std::sync::Arc::new(store),
             app,
             pending: VecDeque::new(),
             pending_hashes: BTreeSet::new(),

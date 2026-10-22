@@ -23,9 +23,9 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Create Cap'n Proto configuration and genesis without overwriting existing files.
+    /// Create JSONL configuration and Cap'n Proto genesis without overwriting existing files.
     Init {
-        #[arg(long, default_value = ".sfc-v3")]
+        #[arg(long, default_value_os_t = sfc::config::persistence_root().join("node"))]
         home: PathBuf,
         #[arg(long)]
         archive: bool,
@@ -34,7 +34,7 @@ enum Command {
     },
     /// Run the explicitly enabled local development sequencer.
     Run {
-        #[arg(long, default_value = ".sfc-v3/config.capnp")]
+        #[arg(long, default_value_os_t = sfc::config::persistence_root().join("node/config.jsonl"))]
         config: PathBuf,
         #[arg(long, value_enum)]
         verification_backend: Option<sfc::verification::Backend>,
@@ -51,7 +51,7 @@ enum Command {
         transport: sfc::config::Transport,
         #[arg(long, default_value = "127.0.0.1:26656")]
         address: std::net::SocketAddr,
-        #[arg(long, default_value = ".sfc-v3/peer-cert.der")]
+        #[arg(long, default_value_os_t = sfc::config::persistence_root().join("node/peer-cert.der"))]
         certificate: PathBuf,
     },
 }
@@ -70,7 +70,8 @@ fn init(home: PathBuf, archive: bool, backend: sfc::verification::Backend) -> Re
     fs::create_dir_all(&home)?;
     let home = fs::canonicalize(home)?;
     ensure!(
-        !home.join("config.capnp").exists()
+        !home.join("config.jsonl").exists()
+            && !home.join("config.capnp").exists()
             && !home.join("genesis.capnp").exists()
             && !home.join("config.json").exists()
             && !home.join("genesis.json").exists(),
@@ -110,7 +111,7 @@ fn init(home: PathBuf, archive: bool, backend: sfc::verification::Backend) -> Re
     };
     sfc::network::generate_identity(&config.tls_cert, &config.tls_key)?;
     write_new(home.join("genesis.capnp"), &genesis)?;
-    write_new(home.join("config.capnp"), &config)?;
+    sfc::config::save(&home.join("config.jsonl"), &config)?;
     println!("Initialized {}. The funded development account uses private key 0x...01; never fund it with real assets.",home.display());
     Ok(())
 }
@@ -120,8 +121,12 @@ async fn run(
     gpu_runtime: Option<sfc::verification::GpuRuntime>,
     no_indexer: bool,
 ) -> Result<()> {
-    let path = fs::canonicalize(path)?;
-    let mut config: Config = sfc::codec::from_slice(&fs::read(&path)?)?;
+    let path = if path.exists() {
+        fs::canonicalize(path)?
+    } else {
+        path
+    };
+    let mut config: Config = sfc::config::load(&path)?;
     if let Some(runtime) = gpu_runtime {
         config.verification.gpu_runtime = runtime;
     }
@@ -165,7 +170,9 @@ async fn run(
         config.clone(),
         Application::default(),
     )?));
-    let _: Config = sfc::codec::upgrade_file(&path)?;
+    if !path.with_extension("jsonl").exists() {
+        sfc::config::save(&path, &config)?;
+    }
     // RocksDB ownership must be established before repairing/appending the log.
     sfc::logging::initialize(&config.data_dir)?;
     fs::write(

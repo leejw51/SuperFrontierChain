@@ -1,0 +1,226 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Super Frontier Chain — architecture, protocol and measured performance."><title>SFC quickstart · SFC</title><style>
+:root{color-scheme:dark;--bg:#080e19;--panel:#111b2a;--line:#243447;--ink:#eaf2fa;--muted:#a5b5c7;--mint:#8af0c3}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--mint);text-underline-offset:4px}a:hover{color:white}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}aside{position:fixed;inset:0 auto 0 0;width:270px;padding:30px 24px;border-right:1px solid var(--line);overflow:auto;background:#0b1320}aside img{width:220px;display:block;margin:0 0 22px}aside .caption,.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;font-weight:700;color:var(--mint)}nav a{display:block;text-decoration:none;color:var(--muted);font-size:13px;line-height:1.5;padding:9px 0}nav a.sub{padding-left:14px;font-size:12px}nav a:hover{color:var(--mint)}main{max-width:1220px;margin-left:270px;padding:60px clamp(24px,5vw,84px) 100px}header{border-bottom:1px solid var(--line);padding-bottom:36px;margin-bottom:40px}header .logo{width:min(560px,100%);display:block;margin-bottom:24px}.actions{display:flex;gap:12px;flex-wrap:wrap}.actions a{font-size:12px;border:1px solid var(--line);padding:6px 13px;border-radius:8px;text-decoration:none}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.04em;line-height:1.15;margin:12px 0 24px}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em;margin-top:58px;padding-top:12px}h3{font-size:19px;margin-top:30px}p,li{color:var(--muted)}strong{color:var(--ink)}li{padding:3px 0}code{font: .86em ui-monospace,SFMono-Regular,Consolas,monospace;background:#172335;border:1px solid #223349;border-radius:5px;padding:2px 5px;overflow-wrap:anywhere}pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;overflow:auto;line-height:1.55}pre code{background:none;border:0;padding:0;overflow-wrap:normal}.table-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:24px 0}table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.6}th{text-align:left;background:#192738;color:var(--mint)}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}td{color:var(--muted)}tr:last-child td{border-bottom:0}tr:hover td{background:#132033}.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:9px}.edge{display:grid;grid-template-columns:1fr .9fr 1fr;align-items:center;gap:12px;font-size:12px;line-height:1.5}.node{padding:10px 12px;border:1px solid #30465a;border-radius:8px;color:var(--ink);background:#0e1927}.arrow{text-align:center;color:var(--mint);font-size:11px}.arrow b{display:block;font-size:20px;line-height:1.2}details{margin-top:16px}summary{color:var(--mint);font-size:12px;cursor:pointer}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--muted)}.skip{position:absolute;top:-90px}.skip:focus{top:10px;left:290px;background:var(--panel);padding:10px;z-index:10}@media(max-width:900px){aside{position:static;width:auto;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}aside img{width:165px;margin:0}aside nav,aside .caption{display:none}main{margin:0;padding:30px 22px 60px}h2{margin-top:38px}.edge{grid-template-columns:1fr 70px 1fr;gap:6px}.flow{padding:12px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{aside,.actions,.skip{display:none}main{margin:0;padding:0;max-width:none}body{background:white;color:#111}p,li,td,footer{color:#333}h1,h2,h3,strong{color:#111}a{color:#175d49}pre,.flow,.node,th{background:#f4f7f8;color:#111}.table-scroll,pre,.flow{break-inside:avoid}header .logo{width:300px}}</style></head><body><a class="skip" href="#content">Skip to content</a><aside><a href="SPECIFICATION.html"><img src="assets/sfc-logo.png" alt="SFC — Super Frontier Chain"></a><p class="caption">On this page</p><nav aria-label="Table of contents"><a class="" href="#requirements">Requirements</a><a class="" href="#start-a-node">Start a node</a><a class="" href="#stop-and-restart">Stop and restart</a><a class="" href="#defaults-and-files">Defaults and files</a><a class="" href="#pruning-and-archive-mode">Pruning and archive mode</a><a class="" href="#multiple-nodes">Multiple nodes</a><a class="" href="#ethereum-contracts">Ethereum contracts</a><a class="" href="#test-and-benchmark">Test and benchmark</a><a class="" href="#troubleshooting">Troubleshooting</a></nav></aside><main id="content"><header><img class="logo" src="assets/sfc-logo.png" alt="Super Frontier Chain"><div class="eyebrow">Engineering documentation / SFC</div><p>Architecture. Execution. Evidence.</p><div class="actions"><a href="QUICKSTART.md">Markdown source ↗</a><a href="SPECIFICATION.html">Specification</a><a href="EXECUTION-ALLOCATION-BENCHMARK.html">Benchmarks</a><a href="ETHEREUM.html">Ethereum compatibility</a></div></header><article><h1 id="sfc-quickstart">SFC quickstart</h1><p>Super Frontier Chain (SFC) is an MIT-licensed Rust blockchain framework with Ethereum
+contract execution, 100 ms blocks, and Cap’n Proto RPC over HTTP/3 synchronization.
+The runnable topology is one development sequencer and verifying followers.
+Distributed validator consensus is not integrated.</p>
+<p>New homes use protocol v3 with Merkle Patricia state commitments. Use a fresh home
+for older flat-hash chains; existing chain directories are preserved.
+See <a href="CAPNP-V3.html">binary formats and configuration editing</a>.</p>
+<h2 id="requirements">Requirements</h2><ul>
+<li>Rust and Cargo, a C/C++ toolchain, and libclang for RocksDB.</li>
+<li>The <code>capnp</code> compiler for generated protocol bindings.</li>
+<li>Make, uv, Python 3.13 and pycapnp for lifecycle commands and local test networks (<code>make codec-setup</code>).</li>
+<li>Apple Silicon + Metal for GPU/HYBRID verification; the default Rust/MLX runtime needs no Python.
+GPU is the default; use <code>SFC_VERIFICATION_BACKEND=cpu</code> on other platforms.</li>
+<li>Node.js and npm for integration tooling and dashboard builds.</li>
+<li>macOS or Linux for the Python service&#39;s file locks and Unix control socket.</li>
+</ul>
+<p>Run commands from the repository root. <code>make doctor</code> checks the main native tools;
+it does not install dependencies. Builds use <code>Cargo.lock</code>.</p>
+<h2 id="start-a-node">Start a node</h2><pre><code>make help
+make doctor
+make codec-setup  # Python tooling for the optional service/testnet commands
+make start</code></pre><p><code>make</code> alone shows help. <code>make start</code> builds the optimized release binary,
+initializes <code>~/.superfrontierchain/node/</code> if configuration is absent, and starts a background node.
+Existing configuration and state are reused. For CPU mode use
+<code>SFC_VERIFICATION_BACKEND=cpu make start</code>; for HYBRID use
+<code>SFC_VERIFICATION_BACKEND=hybrid make start</code>. An already-running service must be
+stopped before changing its mode. See <a href="VERIFICATION-BACKENDS.md">backend settings and measurements</a>.</p>
+<p>Open <a href="http://127.0.0.1:8545/dashboard">the dashboard</a>. It refreshes every two seconds
+and shows height, committed TPS, block timing, pending transactions, recent blocks,
+accounts, retention, and configured sync transport. TPS is a recent block-window
+average; an empty chain has no meaningful rate yet. Connection status refers to
+the dashboard API, not peer connectivity.</p>
+<pre><code>curl -s http://127.0.0.1:8545/ \
+  -H 'Content-Type: application/json' \
+  -d '{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_chainId&quot;,&quot;params&quot;:[]}'
+
+curl -s http://127.0.0.1:8545/dashboard/stats -o /tmp/sfc-stats.capnp
+python3 scripts/sfc_codec.py /tmp/sfc-stats.capnp
+make peer-status</code></pre><p>Expected chain ID: <code>0x1e61</code> (7777). Peer status uses TCP by default; select HTTP/3 with <code>TRANSPORT=http3</code>.</p>
+<h2 id="stop-and-restart">Stop and restart</h2><pre><code>make stop
+make start</code></pre><p>Stop requests graceful shutdown and allows ten seconds before forced termination.
+Repeated commands are safe. The repository-wide stop command also stops its foreground nodes, testnet and
+stress processes. It leaves unrelated processes running.</p>
+<p>To start in a custom home (stop still applies repository-wide):</p>
+<pre><code>make start DATA_DIR=.sfc-local
+make stop DATA_DIR=.sfc-local</code></pre><p>Custom homes still default to the same ports. Change their <code>config.jsonl</code> listener
+addresses before running multiple independent services. If <code>CONFIG</code> overrides the
+default path, that file must already exist.</p>
+<p>For foreground operation on a new home:</p>
+<pre><code>make init DATA_DIR=.sfc-foreground
+make run DATA_DIR=.sfc-foreground
+# Ctrl-C stops the foreground node.</code></pre><p><code>make dev</code> uses a debug build; <code>make run-log</code> runs in the foreground and appends
+node diagnostics to <code>DATA_DIR/node.log</code>.</p>
+<h2 id="defaults-and-files">Defaults and files</h2><div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Ethereum HTTP JSON-RPC</td>
+<td><code>127.0.0.1:8545</code></td>
+</tr>
+<tr>
+<td>Peer HTTP/3 over UDP</td>
+<td><code>127.0.0.1:26656</code></td>
+</tr>
+<tr>
+<td>Direct Cap’n Proto TCP</td>
+<td><code>127.0.0.1:26656</code>, default sync transport</td>
+</tr>
+<tr>
+<td>Block interval</td>
+<td>100 ms</td>
+</tr>
+<tr>
+<td>History retention</td>
+<td>60 seconds</td>
+</tr>
+<tr>
+<td>EVM fork</td>
+<td>Shanghai</td>
+</tr>
+<tr>
+<td>Chain ID</td>
+<td>7777</td>
+</tr>
+</tbody></table></div>
+<p>Listeners must use loopback addresses in the current development implementation.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Path under <code>~/.superfrontierchain/node/</code></th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>config.jsonl</code></td>
+<td>Editable node configuration, one top-level field per line</td>
+</tr>
+<tr>
+<td><code>genesis.capnp</code></td>
+<td>Binary chain initialization</td>
+</tr>
+<tr>
+<td><code>peer-cert.der</code>, <code>peer-key.der</code></td>
+<td>Local TLS identity; keep the private key private</td>
+</tr>
+<tr>
+<td><code>data/rocksdb/</code></td>
+<td>Authoritative state, history, indexes, and native WAL</td>
+</tr>
+<tr>
+<td><code>data/history/*.capnp</code></td>
+<td>Recoverable block-history projection (60-second segments by default)</td>
+</tr>
+<tr>
+<td><code>node.log</code></td>
+<td>Readable node/GPU diagnostics</td>
+</tr>
+<tr>
+<td><code>data/logs/node.capnp</code></td>
+<td>Structured binary events, indexed in SQLite</td>
+</tr>
+<tr>
+<td><code>service.log</code></td>
+<td>Python service diagnostics</td>
+</tr>
+<tr>
+<td><code>service.lock</code>, <code>control.sock</code></td>
+<td>Background process ownership and control</td>
+</tr>
+</tbody></table></div>
+<p>Runtime logs append across restarts without automatic rotation. They are separate
+from RocksDB&#39;s durable journal and the block-history projection.</p>
+<h2 id="pruning-and-archive-mode">Pruning and archive mode</h2><p>The generated configuration enables pruning:</p>
+<pre><code>{&quot;retention&quot;:{&quot;mode&quot;:&quot;pruned&quot;,&quot;seconds&quot;:60}}</code></pre><p>The cutoff follows committed block time. Old blocks and receipt indexes expire;
+current balances, code, and contract storage remain. Pruned history segments span
+<code>min(retention_seconds, 60)</code> seconds; the boundary segment may temporarily retain
+less than one extra segment. Archive segments span one hour. Disk space is reclaimed
+through RocksDB compaction rather than immediately upon logical deletion.</p>
+<p>To create an archive home:</p>
+<pre><code>make archive DATA_DIR=.sfc-archive
+make start DATA_DIR=.sfc-archive
+make stop DATA_DIR=.sfc-archive</code></pre><p>Archive mode keeps all future history. It cannot restore already pruned blocks.</p>
+<h2 id="multiple-nodes">Multiple nodes</h2><p>Stop a default single node first to free its ports, then run:</p>
+<pre><code>make stop
+make testnet</code></pre><p>The Python supervisor starts one sequencer and three followers. Default RPC ports
+are 8545–8548; HTTP/3 UDP ports are 26656–26659. Each node has its own data and
+<code>node.log</code> under <code>~/.superfrontierchain/testnet/node-N/</code>. Submit transactions to node 0. Followers
+replay its blocks over certificate-pinned HTTP/3. Ctrl-C shuts down the whole group.
+The supervisor restarts crashed processes with a bounded retry budget.</p>
+<pre><code>make testnet NODES=6 TESTNET_DIR=.sfc-six RPC_PORT=8645 PEER_PORT=27656</code></pre><p>Use a new home when changing node count. Existing network configuration is reused,
+so port options only apply when creating the network.</p>
+<h2 id="ethereum-contracts">Ethereum contracts</h2><p>Connect tools to <code>http://127.0.0.1:8545/</code>, chain ID 7777. Compile Solidity for
+<code>evmVersion: &quot;shanghai&quot;</code>. The local funded account is
+<code>0x7e5f4552091a69125d5dfcb7b8c2659029395bdf</code>, with development private key
+<code>0x</code> followed by 63 zeroes and <code>1</code>. This publicly known key is for local tests only.</p>
+<pre><code>make erc20</code></pre><p>The test deploys an ERC-20 and verifies transfers, allowances, events, reverts,
+persistence, and follower replay. See <a href="ETHEREUM.html">Ethereum compatibility</a> for
+supported methods and limitations.</p>
+<h2 id="test-and-benchmark">Test and benchmark</h2><div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Coverage</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>make test</code></td>
+<td>Rust unit and integration tests</td>
+</tr>
+<tr>
+<td><code>make check</code></td>
+<td>Formatting, Clippy, and Rust tests</td>
+</tr>
+<tr>
+<td><code>make integration</code></td>
+<td>Process smoke, ERC-20, supervisor, TCP, and pruning tests</td>
+</tr>
+<tr>
+<td><code>make test-sync</code></td>
+<td>HTTP/3 catch-up, crash recovery, and pruning scenarios</td>
+</tr>
+<tr>
+<td><code>make test-service</code></td>
+<td>Background start/stop and failure cleanup</td>
+</tr>
+<tr>
+<td><code>make benchmark</code></td>
+<td>Rust-only release committed TPS/CPU; SQLite ON/OFF</td>
+</tr>
+<tr>
+<td><code>make bench-network</code></td>
+<td>Two-node binary RPC admission through durable follower replay</td>
+</tr>
+<tr>
+<td><code>make test-emergencies</code></td>
+<td>15 crash, freeze, partition and recovery scenarios</td>
+</tr>
+</tbody></table></div>
+<pre><code>make benchmark BENCH_TRANSACTIONS=262144 BENCH_REPEAT=3 BENCH_SQLITE=both
+make stresstest STRESS_SQLITE=on
+make stop</code></pre><p><code>benchmark</code> defaults to 262,144 transfers per trial, three trials per SQLite mode,
+4,096 requests per batch and a 10 ms block interval. Rust generates signatures
+before timing; measured TPS includes RPC, verification, execution and durable commit.
+<code>bench-network</code> also waits for follower replay. <code>bench</code> remains the separate Rust
+execution microbenchmark. See <a href="VERIFICATION-BACKENDS.md">verification and measurements</a>.</p>
+<h2 id="troubleshooting">Troubleshooting</h2><ul>
+<li><strong>Startup failed:</strong> inspect <code>node.log</code> and <code>service.log</code>; check port conflicts.</li>
+<li><strong>Genesis mismatch:</strong> use the original genesis for existing data or a fresh home.</li>
+<li><strong>Follower missing history:</strong> configure an archive peer with the same chain and
+genesis. Automatic snapshot sync and peer failover are not implemented.</li>
+<li><strong>TLS error:</strong> pin the upstream&#39;s certificate and use its matching server name;
+generated identities use <code>localhost</code>.</li>
+<li><strong>Dashboard stale:</strong> check whether the node is running and inspect its logs.</li>
+<li><strong>Corrupt journal:</strong> startup deliberately refuses corrupted WAL records; there
+is no automatic destructive repair or silent rollback.</li>
+</ul>
+<p>Next: <a href="PROTOCOL.html">protocol</a> · <a href="ARCHITECTURE.html">architecture</a>.</p>
+<p>Binary bulk RPC benchmarking defaults to TCP. Use <code>BENCH_TRANSPORT=http3</code> to select
+HTTP/3, or <code>make bench-transports</code> to alternate both transports under the same
+conditions. See <a href="BINARY-TRANSPORT-BENCHMARK.md">measured transport results</a>.</p>
+</article><footer>Super Frontier Chain · Generated from QUICKSTART.md · Rebuild: npm run build:docs<br>Static, offline-readable documentation. No external scripts, fonts or trackers.</footer></main></body></html>

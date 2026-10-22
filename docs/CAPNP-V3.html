@@ -1,0 +1,155 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Super Frontier Chain — architecture, protocol and measured performance."><title>Protocol v3 binary formats · SFC</title><style>
+:root{color-scheme:dark;--bg:#080e19;--panel:#111b2a;--line:#243447;--ink:#eaf2fa;--muted:#a5b5c7;--mint:#8af0c3}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--mint);text-underline-offset:4px}a:hover{color:white}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}aside{position:fixed;inset:0 auto 0 0;width:270px;padding:30px 24px;border-right:1px solid var(--line);overflow:auto;background:#0b1320}aside img{width:220px;display:block;margin:0 0 22px}aside .caption,.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;font-weight:700;color:var(--mint)}nav a{display:block;text-decoration:none;color:var(--muted);font-size:13px;line-height:1.5;padding:9px 0}nav a.sub{padding-left:14px;font-size:12px}nav a:hover{color:var(--mint)}main{max-width:1220px;margin-left:270px;padding:60px clamp(24px,5vw,84px) 100px}header{border-bottom:1px solid var(--line);padding-bottom:36px;margin-bottom:40px}header .logo{width:min(560px,100%);display:block;margin-bottom:24px}.actions{display:flex;gap:12px;flex-wrap:wrap}.actions a{font-size:12px;border:1px solid var(--line);padding:6px 13px;border-radius:8px;text-decoration:none}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.04em;line-height:1.15;margin:12px 0 24px}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em;margin-top:58px;padding-top:12px}h3{font-size:19px;margin-top:30px}p,li{color:var(--muted)}strong{color:var(--ink)}li{padding:3px 0}code{font: .86em ui-monospace,SFMono-Regular,Consolas,monospace;background:#172335;border:1px solid #223349;border-radius:5px;padding:2px 5px;overflow-wrap:anywhere}pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;overflow:auto;line-height:1.55}pre code{background:none;border:0;padding:0;overflow-wrap:normal}.table-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:24px 0}table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.6}th{text-align:left;background:#192738;color:var(--mint)}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}td{color:var(--muted)}tr:last-child td{border-bottom:0}tr:hover td{background:#132033}.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:9px}.edge{display:grid;grid-template-columns:1fr .9fr 1fr;align-items:center;gap:12px;font-size:12px;line-height:1.5}.node{padding:10px 12px;border:1px solid #30465a;border-radius:8px;color:var(--ink);background:#0e1927}.arrow{text-align:center;color:var(--mint);font-size:11px}.arrow b{display:block;font-size:20px;line-height:1.2}details{margin-top:16px}summary{color:var(--mint);font-size:12px;cursor:pointer}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--muted)}.skip{position:absolute;top:-90px}.skip:focus{top:10px;left:290px;background:var(--panel);padding:10px;z-index:10}@media(max-width:900px){aside{position:static;width:auto;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}aside img{width:165px;margin:0}aside nav,aside .caption{display:none}main{margin:0;padding:30px 22px 60px}h2{margin-top:38px}.edge{grid-template-columns:1fr 70px 1fr;gap:6px}.flow{padding:12px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{aside,.actions,.skip{display:none}main{margin:0;padding:0;max-width:none}body{background:white;color:#111}p,li,td,footer{color:#333}h1,h2,h3,strong{color:#111}a{color:#175d49}pre,.flow,.node,th{background:#f4f7f8;color:#111}.table-scroll,pre,.flow{break-inside:avoid}header .logo{width:300px}}</style></head><body><a class="skip" href="#content">Skip to content</a><aside><a href="SPECIFICATION.html"><img src="assets/sfc-logo.png" alt="SFC — Super Frontier Chain"></a><p class="caption">On this page</p><nav aria-label="Table of contents"><a class="" href="#encoding-boundaries">Encoding boundaries</a><a class="" href="#hashes-and-bounds">Hashes and bounds</a><a class="" href="#tools">Tools</a><a class="" href="#compatible-schema-upgrades-within-v3">Compatible schema upgrades within v3</a><a class="" href="#validation-and-performance">Validation and performance</a></nav></aside><main id="content"><header><img class="logo" src="assets/sfc-logo.png" alt="Super Frontier Chain"><div class="eyebrow">Engineering documentation / SFC</div><p>Architecture. Execution. Evidence.</p><div class="actions"><a href="CAPNP-V3.md">Markdown source ↗</a><a href="SPECIFICATION.html">Specification</a><a href="EXECUTION-ALLOCATION-BENCHMARK.html">Benchmarks</a><a href="ETHEREUM.html">Ethereum compatibility</a></div></header><article><h1 id="protocol-v3-binary-formats">Protocol v3 binary formats</h1><p>Default homes are <code>~/.superfrontierchain/node</code>, <code>~/.superfrontierchain/testnet</code>
+and <code>~/.superfrontierchain/stress</code>. Older repository-local homes are preserved.
+Protocol v1/v2 and earlier flat-state-hash chains require a fresh home: they are
+separate histories even though the development Ethereum chain ID is still 7777.
+See <a href="MERKLE-TRIE.html">Merkle commitment compatibility</a> before reusing existing data.</p>
+<h2 id="encoding-boundaries">Encoding boundaries</h2><div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Encoding</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Ethereum HTTP RPC request/response</td>
+<td>JSON-RPC</td>
+</tr>
+<tr>
+<td>Peer HTTP/3 and TCP RPC</td>
+<td>Typed <code>chain.capnp</code>; <code>getEncodedBlocks</code> carries canonical block bytes</td>
+</tr>
+<tr>
+<td>GPU recovery IPC</td>
+<td>Typed <code>runtime.capnp</code> request/response; packed UInt32 limbs and binary public keys</td>
+</tr>
+<tr>
+<td>Node configuration</td>
+<td>JSONL, one top-level field per line</td>
+</tr>
+<tr>
+<td>Genesis, metadata, signing guard</td>
+<td>Typed <code>runtime.capnp.Record</code></td>
+</tr>
+<tr>
+<td>Supervisor network manifest</td>
+<td>JSONL, one node configuration per line</td>
+</tr>
+<tr>
+<td>Runtime info, supervisor status, dynamic presentation/log fields</td>
+<td>Cap’n Proto <code>Value</code></td>
+</tr>
+<tr>
+<td>RocksDB blocks, accounts, world and SQLite headers/receipts</td>
+<td>Typed canonical <code>storage.capnp</code> segments</td>
+</tr>
+<tr>
+<td>SQLite block, receipt and log payloads</td>
+<td>Cap’n Proto BLOB</td>
+</tr>
+<tr>
+<td>SQLite search columns</td>
+<td>Native SQL integers/text; signed Ethereum transactions are BLOBs</td>
+</tr>
+<tr>
+<td>Dashboard stats/index API</td>
+<td><code>application/x-capnp</code>, decoded in the browser</td>
+</tr>
+<tr>
+<td>History, structured logs, stress reports</td>
+<td>Length-framed Cap’n Proto records</td>
+</tr>
+<tr>
+<td>Supervisor control socket</td>
+<td>Length-framed Cap’n Proto</td>
+</tr>
+</tbody></table></div>
+<p>Immutable blocks own shared <code>Bytes</code> backed by a canonical Cap’n Proto arena.
+Readers borrow transaction and receipt fields directly. Peer synchronization copies
+one block payload at the RPC/thread boundary and shares its transaction slices;
+it does not rebuild a <code>WireBlock</code> or per-transaction byte vectors. Followers verify
+signatures, execute the block, and compare the entire canonical result before commit.
+Transaction ownership is shared through admission/execution/block construction.</p>
+<p>Domain records implement explicit typed codecs. Generic <code>Serialize → Value → Capnp</code>
+encoding is gone. Dynamic dashboard/log fields still use the schema-defined <code>Value</code>
+union directly; <code>serde_json::Value</code> is an in-memory presentation type, not JSON text.
+Historical index headers without gas metadata retain an unknown gas value (shown as a dash). New headers store the actual committed gas total.</p>
+<p>Serde deserialization also reads editable JSONL configuration, legacy binary Value
+records during compatible metadata migration, and external test fixtures.</p>
+<p>The default native Rust/MLX GPU path uses reusable shared buffers directly,
+without a Python worker, socket transport or Capnp wrapping. Rust writes 25
+little-endian UInt32 limbs per signature and reads 17-word results after GPU completion.
+It validates output statuses and SEC1 curve points before deriving addresses.
+This runtime change does not alter chain encoding or commitments.</p>
+<p>The optional legacy MLX worker&#39;s GPU inputs contain 25 little-endian UInt32 limbs per signature (digest, r, s, parity).
+Rust writes directly into pre-sized Capnp Data and streams the message segments
+without flattening them into a second payload buffer. NumPy views the Python Data
+buffer before MLX transfer. GPU responses use contiguous rows of 17 little-endian
+UInt32 words (status, x, y), avoiding per-key Python byte objects and Capnp lists.
+Rust borrows the response from a reusable receive buffer, checks row counts and
+statuses, and validates SEC1 curve points before deriving addresses. The new
+response is explicitly requested with <code>packedResults</code>; older clients and workers
+can use the existing key list. It does not change stored block/state formats.</p>
+<p>There is no production hex round trip. CPU and GPU arithmetic is unchanged. EVM
+execution still needs mutable state and decoded transaction fields: this is not an
+allocation-free VM. Native GPU input preparation and result decoding still touch
+memory; EVM and persistence also allocate and copy. This is not end-to-end zero copy.</p>
+<p>Ethereum RLP, ABI, EVM code, cryptographic signatures/preimages, TLS certificates,
+and RocksDB/SQLite native files keep their required encodings. Human terminal
+diagnostics remain readable text. Package manifests, Solidity compiler input,
+and historical benchmark reports are external tooling or archived artifacts.</p>
+<h2 id="hashes-and-bounds">Hashes and bounds</h2><p>Object keys are sorted before encoding. Block hashes use canonical Cap’n Proto
+segment bytes prefixed by <code>sfc/block/v3/capnp</code>. State roots use the incremental
+<a href="MERKLE-TRIE.html">Merkle Patricia commitment</a> with canonical account segments.
+Blocks/accounts/world/receipts store raw canonical single segments. Other runtime
+records include the standard unpacked segment table. Block history frames hold raw
+segments; use <code>scripts/sfc_codec.py FILE --blocks</code> to inspect them.
+Map ordering, state/block hash vectors, restart/replay, and CPU/GPU agreement are
+covered by tests. Future schema additions that affect commitments require a
+deliberate protocol upgrade; automatic storage migration does not authorize them.</p>
+<p>Streams add an eight-byte little-endian byte length before each message. Runtime
+records are bounded to 256 MiB and nesting to 64. GPU requests are bounded to
+2 MiB/4,096 inputs; responses to 1 MiB, with request ID/count/protocol validation.
+Control messages are limited to 64 KiB. Truncated frames fail; the node&#39;s log
+writer repairs only an incomplete final frame before appending.</p>
+<h2 id="tools">Tools</h2><pre><code>make codec-setup          # Python Cap’n Proto tooling, including CPU-only hosts
+make mlx-setup            # optional legacy Python MLX worker only
+make stresstest          # persistent default stress home; continuous GPU release test
+make stop
+python3 scripts/sfc_codec.py ~/.superfrontierchain/stress/node-0/config.jsonl
+python3 scripts/sfc_codec.py ~/.superfrontierchain/stress/results.capnp --stream
+python3 scripts/sfc_codec.py ~/.superfrontierchain/stress/node-0/data/logs/node.capnp --stream</code></pre><p>Edit a stopped node&#39;s <code>config.jsonl</code> directly, or use the shared adapter:</p>
+<pre><code>target/mlx-venv/bin/python - &lt;&lt;'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, 'scripts')
+import sfc_codec as codec
+path = Path.home() / '.superfrontierchain/node/config.jsonl'
+config = codec.read(path)
+config['verification']['backend'] = 'cpu'
+codec.write(path, config)
+PY</code></pre><p><code>sfc peer-status</code> writes one binary message to stdout; redirect it to a <code>.capnp</code>
+file and inspect it using the same tool. Dashboard APIs can be fetched to a file
+in the same way. Rust build generates all three schema bindings; <code>npm run build:dashboard</code>
+regenerates the JavaScript schema and embeds the browser decoder.</p>
+<p><code>make test-codec</code> verifies Rust → Python → JavaScript → Rust compatibility,
+including maximum-width integers, Unicode, multiple segments, and malformed frames.
+<code>cargo test --test codec --test determinism --test migrations</code> covers canonical
+encoding, hash vectors, legacy rejection, and transactional schema upgrades.</p>
+<h2 id="compatible-schema-upgrades-within-v3">Compatible schema upgrades within v3</h2><p>RocksDB schema 2 atomically upgrades genesis/head/version metadata after checking
+the existing state commitment. Receipt-height keys written by older v3 binaries
+remain readable and are naturally replaced/pruned. Signer schema 2 validates and
+rewrites identity/vote records in one synchronous batch, retaining the double-sign
+guard. Legacy <code>config.capnp</code> files remain readable; the node writes a JSONL companion
+when one is absent. Configuration writes and compatible genesis upgrades use a
+synced temporary file and atomic rename. These upgrades do not change v3 block or state hashes. Unknown newer
+versions fail without rewriting data. Protocol-v1/v2 chain histories remain separate.</p>
+<h2 id="validation-and-performance">Validation and performance</h2><p><code>cargo test --test binary_blocks --test migrations</code> checks borrowed payloads,
+canonical bytes, corrupt inputs, restart and compatible metadata upgrades.
+<code>cargo run --release --example codec_benchmark</code> compares selective JSON queries,
+full decode, borrowed reads, complete Capnp validation, encoding and allocations.
+Do not interpret field-access speedups as TPS multipliers: with 4,096 transactions
+per block and a 100 ms interval, scheduling alone limits sustained throughput to
+roughly 40,960 TPS. <code>STRESS_INTERVAL=10 make stresstest</code> tests a shorter interval;
+compare CPU cost, durability and indexer lag as well as throughput.</p>
+</article><footer>Super Frontier Chain · Generated from CAPNP-V3.md · Rebuild: npm run build:docs<br>Static, offline-readable documentation. No external scripts, fonts or trackers.</footer></main></body></html>

@@ -176,11 +176,11 @@ conformance claim. See [compatibility details](ETHEREUM.md).
 `make stresstest`: release build, one sequencer, native MLX GPU, SQLite ON, Capnp TCP,
 12 Rayon workers, 4,096-entry batches, one in-flight batch, 10 ms block scheduling,
 1,048,576 transactions per round. Runs until `make stop` or Ctrl-C. Startup prints
-URLs and persistence paths. Home: `.sfc-stress-merkle-v1`; old homes are preserved.
+URLs and persistence paths. Home: `~/.superfrontierchain/stress`; old homes are preserved.
 
 Python supervises the build and Rust runner lifecycle; no benchmark computation or
 GPU execution runs in Python. `make stressstart` starts the same workload in the
-background. Supervisor output is appended to `.sfc-processes/stress.log`. Duplicate
+background. Supervisor output is appended to `~/.superfrontierchain/supervisor/stress.log`. Duplicate
 starts return successfully without starting another runner. `make stop` discovers
 this repository's current-user blockchain processes and supervisors, terminates
 their descendants, waits for exit and escalates to SIGKILL after a grace period.
@@ -245,3 +245,201 @@ local and network dashboard URLs, including the Tailscale IPv4 URL when
 available. An iPad must share the LAN or have permitted access through Tailscale.
 Set `STRESS_BIND=127.0.0.1` to restrict HTTP access to this machine.
 Direct benchmark runs retain a loopback default unless `--rpc-bind` is supplied.
+
+
+### JSONL settings and short retention
+
+Persistence defaults to `~/.superfrontierchain`, with separate `node/`,
+`stress/node-0/`, `testnet/` and `supervisor/` directories. Node settings
+are in `config.jsonl`, one top-level field per JSON line. Edit and restart:
+
+```jsonl
+{"retention":{"mode":"pruned","seconds":60}}
+```
+
+The default is **60 seconds**, configurable as a positive integer; archive mode
+is explicit. Existing configuration values are preserved when loading old homes.
+Legacy Cap’n Proto configs remain readable and are preserved during JSONL migration.
+Genesis and chain/network data remain Cap’n Proto.
+
+RocksDB expires blocks and receipt indexes relative to the committed head timestamp.
+SQLite asynchronously removes rows older than RocksDB's earliest retained height,
+including transaction receipts, and expires indexed logs by wall-clock age.
+Current state remains. Projection segments rotate at min(retention seconds, 60),
+so a partial boundary segment can retain up to one additional segment. SQLite
+reuses freed pages and RocksDB reclaims physical space during compaction.
+Raw diagnostic logs and benchmark reports have separate lifetimes; retention
+is not a total disk-size limit.
+
+## 10. Shared hashes and bounded block reads — 2026-10-22
+
+Block clones share their lazy Keccak cache as well as their immutable Cap'n Proto
+bytes. Computing a hash in the durable head cache now initializes the producer,
+logging and subsequent-parent views too, including clones created before hashing.
+The hash domain, canonical bytes and consensus rules are unchanged.
+
+Local block construction checks transaction count, receipt count and byte bounds
+before allocating its arena. Fixed-width hashes and Rust strings guarantee the
+remaining width/UTF-8 invariants; log hex is checked while writing. Canonicalization
+still uses `set_root_canonical`. Ordinary locally built blocks avoid a second full
+wire scan. Records larger than 32 MiB retain full reader validation to preserve
+traversal-budget acceptance. All incoming network and persisted bytes retain the
+complete canonical and structural checks. Index receipt records are canonicalized
+directly from their borrowed reader, avoiding an intermediate receipt arena.
+
+The three block-read RPC methods use blocking workers and a shared Store, without
+holding the Node mutex. A RocksDB snapshot and cached head are captured together
+under the store's head lock; the lock is released before disk reads and validation.
+The snapshot preserves a consistent batch while commits/pruning proceed. Existing
+64-block and approximately 2 MiB batch bounds remain, allowing one larger first
+block. Each connection allows two active block reads; a worker retains its permit
+even when its caller is cancelled, through completion and response construction.
+
+GPU runtime remains native MLX, with the existing kernels, 2,048-record crossover,
+50-microsecond completion polling and CPU/GPU/HYBRID rules. A focused benchmark
+checks CPU-equivalent transactions and measures native verification at small,
+large and crossover batches, excluding signing, network, execution and disk:
+
+```sh
+RAYON_NUM_THREADS=12 cargo run --offline --locked --release --example verification_benchmark
+```
+
+### Measurements and remaining throughput limit
+
+[Raw results and methodology](hash-capnp-results-2026-10-22.json) retain all trials,
+binary hashes, codec allocations, GPU latency and diagnostic exclusions.
+In an isolated release codec run (4,096 transfers, seven samples), local block
+construction fell from **863.1 to 478.2 microseconds (44.6% less time)**. Incoming
+block validation remained approximately 389/384 microseconds. Sharing the hash
+cache adds one 56-byte allocation per constructed/imported block; borrowed field
+reads still allocate nothing.
+
+This is **not a demonstrated end-to-end throughput improvement**. Three alternating
+million-transfer pairs, native MLX, TCP, SQLite ON, 12 Rayon workers and a 10 ms
+scheduler produced:
+
+| Pair | Before committed TPS | After committed TPS |
+| --- | ---: | ---: |
+| 1 | 257,666 | 206,202 |
+| 2 | 258,726 | 204,907 |
+| 3 | 210,673 | 256,699 |
+| Median | 257,666 | 206,202 |
+
+The primary median is **20.0% lower**. Median node CPU time per transfer changed
+from 10.66 to 10.48 microseconds and post-commit SQLite catch-up from 10.09 to
+9.93 seconds. Both binaries also showed approximately 200k/260k TPS modes in
+additional diagnostics, so these changes must not be advertised as a throughput
+win or a sustained-capacity measurement.
+
+A separate persistent-run diagnostic recorded 7 versus 137 empty blocks between
+its first and last full transaction blocks (256 full blocks in each run). That
+pair achieved 260,172 versus 255,418 TPS with lower node CPU in the candidate.
+This motivates investigation of timer/admission interaction; it does not isolate
+the cause of the primary regression. Empty-block scheduling policy is unchanged.
+The first extra reverse-order candidate trial briefly overlapped an earlier
+codec run; those diagnostic trials are excluded from the primary comparison.
+
+Validation passed: 82 standard release tests; native MLX differential tests;
+CPU/GPU/HYBRID order, error and state/replay parity; three native benchmark,
+recovery and replication tests; release Clippy with warnings denied; formatting
+and whitespace checks. The new RPC regression holds the execution mutex while
+all three block-read methods complete over both TCP and HTTP/3.
+
+## 11. Throughput stall investigation and follow-up (2026-10-22)
+
+[Raw trials, phase timings and exclusions](tps-investigation-2026-10-22.json)
+record the follow-up to section 10. Temporary diagnostic builds buffered timing
+records in memory and wrote them on exit. Final throughput runs use the ordinary
+release executable without those probes.
+
+### Cause and persistence change
+
+The slow mode reproduced with nearly unchanged verification and block execution
+time. In one fast/slow pair, total history projection sync time increased from
+136 to 977 ms; individual syncs averaged 3.8 versus 26.4 ms and reached 114 ms.
+These syncs ran inside `Node::produce`, holding the execution mutex and delaying
+admission. Both modes produced similar numbers of empty blocks, so empty-block
+count was not a sufficient explanation.
+
+A background-fsync prototype did not remove the slowdown: in a slow traced run,
+RocksDB commit time increased from about 4.3 to 6.8 ms per full block, with an
+86 ms maximum. The measurements are consistent with storage contention moving
+between the two writers; they do not identify the underlying device/OS cause of
+variable fsync latency. The prototype was discarded.
+
+The retained implementation removes the projection's periodic 100 ms / 8 MiB
+sync. History records are still appended immediately and synced on segment close
+and clean shutdown. The authoritative RocksDB WAL still synchronously commits
+every block before acknowledgment; its options and the signing journal are
+unchanged. A crash may lose more projection bytes, which restart reconstructs
+from retained RocksDB blocks. A regression test SIGKILLs a writer after 32 blocks
+and 32,768 transactions, removes all history files (over 8 MiB), and verifies
+recovered blocks, world state and transaction lookup.
+
+SQLite catch-up now reads its earliest height and bounded block batch from a
+single RocksDB snapshot. It neither waits for nor holds the Node mutex during
+block reads/validation. The 16-block / approximately 8 MiB batch limit and atomic
+SQLite row/cursor commits remain. A regression holds the execution mutex while
+the indexer catches up to a newly committed block.
+
+### Native MLX dispatch
+
+The MLX runtime and kernel arithmetic remain unchanged. Measurements of the two
+existing paths favor cooperative recovery through 2,560 records on this M5 Max;
+at 2,816 and 4,096 records the direct path is faster. The native MLX crossover is
+therefore 2,560; direct Metal's selection is unchanged. CPU differential checks
+include 2,559/2,560/2,561 as well as the former boundary.
+
+| Batch | Previous selection | Cooperative path | Latency reduction |
+| --- | ---: | ---: | ---: |
+| 2,049 | 8.406 ms | 7.154 ms | 14.9% |
+| 2,304 | 8.438 ms | 7.331 ms | 13.1% |
+| 2,560 | 8.456 ms | 7.487 ms | 11.5% |
+
+These are total native verification microbenchmarks, including CPU preparation
+and GPU wait, with nine samples of ten iterations. They exclude RPC, execution
+and storage. The 4,096-record end-to-end workload uses the same direct GPU path
+before and after, so its throughput change is not attributed to this crossover.
+
+### Final paired throughput and validation
+
+Four pairs alternate AB/BA order. The baseline already includes section 10's
+Capnp optimizations; the candidate adds the changes in this section. Both use
+1,048,576 transfers, 4,096 records per RPC, inflight 1, 10 ms scheduling, one node,
+TCP, native MLX, SQLite ON and 12 Rayon threads. Signing is outside timing;
+verification, execution and durable RocksDB commit are inside. Index catch-up is
+measured afterward.
+
+| Pair | Before TPS | After TPS | Paired improvement |
+| --- | ---: | ---: | ---: |
+| 1 | 258,254 | 270,617 | 4.8% |
+| 2 | 209,945 | 214,793 | 2.3% |
+| 3 | 255,328 | 269,234 | 5.4% |
+| 4 | 213,226 | 267,705 | 25.5% |
+
+All four pairs improved; the median of the **paired improvements is 5.1%**.
+The ratio of the separate TPS medians is larger: 234,277 to 268,470, or 14.6%.
+The difference reflects the fast/slow execution modes and must not be presented
+as a uniform 14.6% gain. Median CPU time per transfer decreased from 10.18 to
+9.97 microseconds; median post-commit SQLite catch-up decreased from 9.98 to 9.63 s.
+The remaining 214,793 TPS candidate run shows that the low-throughput mode was
+not completely eliminated.
+
+A separate persistent-node check completed three million-transfer rounds at
+270,139 / 270,033 / 270,909 TPS. Each round signs before timing and does not wait
+for SQLite catch-up before the next round. Its fixture differs from the paired
+runs, so it is not included in those statistics. Neither experiment establishes
+long-term saturated capacity, large-contract-state or multi-host throughput.
+
+Validation passed: 84 standard release tests, native MLX differential tests at
+the new crossover, CPU/GPU/HYBRID state and replay parity, all three native
+benchmark/recovery/replication tests, release Clippy with warnings denied, format
+and whitespace checks. No temporary tracing or experimental environment switches
+are present in the production source.
+
+```sh
+RAYON_NUM_THREADS=12 target/release/sfc-bench bench \
+  --binary /path/to/sfc --transactions 1048576 --rpc-batch 4096 \
+  --inflight 1 --interval 10 --repeat 1 --sqlite on --output /tmp/result.capnp
+# Alternate the retained before/after release binaries for paired comparisons.
+```

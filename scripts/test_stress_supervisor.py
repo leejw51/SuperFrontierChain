@@ -25,7 +25,7 @@ def wait_round(home):
         if (home / 'stress.log').exists() and 'Round 1:' in (home / 'stress.log').read_text():
             return
         time.sleep(.1)
-    raise AssertionError((ROOT / '.sfc-processes/stress.log').read_text()[-6000:])
+    raise AssertionError((supervisor.STATE / 'stress.log').read_text()[-6000:])
 
 
 # Do not interfere with a user's active blockchain session when this test is invoked.

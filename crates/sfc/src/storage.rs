@@ -13,7 +13,6 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Mutex, RwLock,
     },
-    time::{Duration, Instant},
 };
 
 pub struct Store {
@@ -25,16 +24,15 @@ pub struct Store {
     head: RwLock<Option<CachedHead>>,
     history_writer: Mutex<Option<HistoryWriter>>,
 }
-// History is a rebuildable projection, not the commit journal. Keep appends
-// visible immediately, but amortize fsync while RocksDB still syncs every commit.
-const HISTORY_SYNC_INTERVAL: Duration = Duration::from_millis(100);
-const HISTORY_SYNC_BYTES: usize = 8 * 1024 * 1024;
+// RocksDB's synced WAL is authoritative. History is a rebuildable projection:
+// append immediately for readers, and sync on segment close/clean shutdown.
+// Periodic projection fsyncs contend with the WAL on the same storage device,
+// even from another thread. Missing/torn history is repaired from RocksDB on open.
 struct HistoryWriter {
     file: File,
     hour: u64,
     length: u64,
     dirty_bytes: usize,
-    last_sync: Instant,
     needs_rollback: bool,
 }
 impl HistoryWriter {
@@ -43,7 +41,6 @@ impl HistoryWriter {
             self.file.sync_all()?;
             self.dirty_bytes = 0;
         }
-        self.last_sync = Instant::now();
         Ok(())
     }
     fn append(&mut self, bytes: &[u8]) -> Result<()> {
@@ -275,6 +272,49 @@ impl Store {
         let height: u64 = crate::codec::from_slice(&bytes)?;
         self.block(height)
     }
+    /// A bounded, consistent read independent of the Node mutex. The snapshot
+    /// keeps records readable even if retention deletes them during this batch.
+    pub(crate) fn block_batch(&self, start: u64, limit: u32) -> Result<Vec<Block>> {
+        let limit = limit.min(64);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let (snapshot, head) = {
+            // Commit publishes its head while holding this lock. Capture both
+            // views together, then release it before disk I/O and validation.
+            let cached = self
+                .head
+                .read()
+                .map_err(|_| anyhow::anyhow!("head lock poisoned"))?;
+            (
+                self.db.snapshot(),
+                cached
+                    .as_ref()
+                    .context("missing cached head")?
+                    .block
+                    .clone(),
+            )
+        };
+        let mut blocks = Vec::new();
+        let mut bytes = 0;
+        for offset in 0..u64::from(limit) {
+            let height = start.checked_add(offset).context("height overflow")?;
+            let block = if height == head.height() {
+                head.clone()
+            } else {
+                let Some(raw) = snapshot.get(block_key(height))? else {
+                    break;
+                };
+                Block::from_bytes(raw)?
+            };
+            if !blocks.is_empty() && bytes + block.as_bytes().len() > 2 * 1024 * 1024 {
+                break;
+            }
+            bytes += block.as_bytes().len();
+            blocks.push(block);
+        }
+        Ok(blocks)
+    }
     pub fn blocks(&self) -> Result<Vec<Block>> {
         let mut blocks = Vec::new();
         for entry in self.db.prefix_iterator(b"block/") {
@@ -285,6 +325,44 @@ impl Store {
             blocks.push(Block::from_bytes(value.into_vec())?);
         }
         Ok(blocks)
+    }
+    /// Read one consistent indexer batch while commits and pruning continue.
+    /// The earliest height and block bytes come from the same RocksDB snapshot.
+    pub(crate) fn index_batch(
+        &self,
+        start: u64,
+        limit: usize,
+        byte_limit: usize,
+    ) -> Result<(u64, Vec<Block>)> {
+        let snapshot = self.db.snapshot();
+        let (key, _) = snapshot
+            .iterator(rocksdb::IteratorMode::From(
+                b"block/",
+                rocksdb::Direction::Forward,
+            ))
+            .next()
+            .context("missing chain history")??;
+        ensure!(key.starts_with(b"block/"), "missing chain history");
+        let earliest: u64 = std::str::from_utf8(&key[6..])?.parse()?;
+        let start = start.max(earliest);
+        let mut blocks = Vec::new();
+        let mut bytes = 0;
+        for offset in 0..limit {
+            let height = start
+                .checked_add(offset as u64)
+                .context("height overflow")?;
+            let Some(raw) = snapshot.get(block_key(height))? else {
+                break;
+            };
+            let block = Block::from_bytes(raw)?;
+            bytes += block.as_bytes().len();
+            blocks.push(block);
+            // Preserve the indexer's single-large-block and byte bounds.
+            if bytes >= byte_limit {
+                break;
+            }
+        }
+        Ok((earliest, blocks))
     }
     pub fn earliest_height(&self) -> Result<u64> {
         for entry in self.db.prefix_iterator(b"block/") {
@@ -387,7 +465,7 @@ impl Store {
             .lock()
             .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
         if block.height() > self.projected_height.load(Ordering::Acquire) {
-            let hour = block.timestamp() / 3600;
+            let hour = block.timestamp() / self.history_segment_seconds();
             if writer.as_ref().is_none_or(|w| w.hour != hour) {
                 if let Some(previous) = writer.as_mut() {
                     previous.sync()?;
@@ -404,7 +482,6 @@ impl Store {
                     file,
                     hour,
                     dirty_bytes: 0,
-                    last_sync: Instant::now(),
                     needs_rollback: false,
                 });
             }
@@ -414,13 +491,6 @@ impl Store {
                 .append(&head.encoded)?;
             self.projected_height
                 .store(block.height(), Ordering::Release);
-        }
-        if let Some(writer) = writer.as_mut() {
-            if writer.dirty_bytes >= HISTORY_SYNC_BYTES
-                || writer.last_sync.elapsed() >= HISTORY_SYNC_INTERVAL
-            {
-                writer.sync()?;
-            }
         }
         self.prune_at(block)?;
         Ok(())
@@ -471,7 +541,7 @@ impl Store {
         if pending != 0 {
             self.write(batch)?;
         }
-        let cutoff_hour = cutoff / 3600;
+        let cutoff_hour = cutoff / self.history_segment_seconds();
         if self.cleaned_hour.load(Ordering::Acquire) != cutoff_hour {
             for entry in fs::read_dir(&self.history)? {
                 let path = entry?.path();
@@ -483,7 +553,9 @@ impl Store {
                     .and_then(|s| s.to_str())
                     .and_then(|s| s.parse::<u64>().ok())
                 {
-                    if hour < cutoff_hour && hour != head.timestamp() / 3600 {
+                    if hour < cutoff_hour
+                        && hour != head.timestamp() / self.history_segment_seconds()
+                    {
                         fs::remove_file(path)?;
                     }
                 }
@@ -493,12 +565,20 @@ impl Store {
         }
         Ok(())
     }
+    fn history_segment_seconds(&self) -> u64 {
+        match self.retention {
+            Retention::Archive => 3600,
+            Retention::Pruned { seconds } => seconds.min(60),
+        }
+    }
     fn repair_history(&self) -> Result<()> {
         // Rebuild the Cap’n Proto projection from authoritative records only on restart.
-        // Hourly segments avoid millions of tiny files at a 500ms block cadence.
+        // Rebuild also migrates legacy hourly projections to retention-sized segments.
         let mut segments = std::collections::BTreeMap::<u64, Vec<u8>>::new();
         for block in self.blocks()? {
-            let bytes = segments.entry(block.timestamp() / 3600).or_default();
+            let bytes = segments
+                .entry(block.timestamp() / self.history_segment_seconds())
+                .or_default();
             crate::codec::write_record(bytes, block.as_bytes())?;
         }
         for (hour, bytes) in &segments {
@@ -541,6 +621,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn history_retry_removes_partial_frame_without_rewriting_valid_bytes() {
         let dir = tempfile::tempdir().unwrap();
@@ -554,7 +635,6 @@ mod tests {
             hour: 0,
             length: 0,
             dirty_bytes: 0,
-            last_sync: Instant::now(),
             needs_rollback: false,
         };
         writer.append(b"first").unwrap();

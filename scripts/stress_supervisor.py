@@ -13,7 +13,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-STATE = ROOT / '.sfc-processes'
+STATE = Path.home() / '.superfrontierchain/supervisor'
 SCRIPT = Path(__file__).resolve()
 STOPPING = False
 STOP_SIGNAL = None
@@ -93,7 +93,7 @@ def signal_same(pid, record, sig):
 
 
 def stop_all():
-    STATE.mkdir(exist_ok=True)
+    STATE.mkdir(parents=True, exist_ok=True)
     # Serialize explicit starts/stops; new starts cannot race the stop scan.
     with (STATE / 'operation.lock').open('a') as operation:
         fcntl.flock(operation, fcntl.LOCK_EX)
@@ -212,7 +212,7 @@ def start(args):
         signal.signal(signal.SIGINT, interrupted)
         signal.signal(signal.SIGTERM, interrupted)
         signal.signal(signal.SIGTSTP, interrupted)
-    STATE.mkdir(exist_ok=True)
+    STATE.mkdir(parents=True, exist_ok=True)
     with (STATE / 'operation.lock').open('a') as operation, (STATE / 'stress.lock').open('a') as lock:
         fcntl.flock(operation, fcntl.LOCK_EX)
         try:

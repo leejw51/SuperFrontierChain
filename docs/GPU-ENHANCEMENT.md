@@ -1,5 +1,10 @@
 # GPU latency enhancement — 2026-10-20
 
+**2026-10-22 update:** the native Rust MLX path now uses cooperative recovery
+through 2,560 records, with direct recovery above that boundary. The kernel
+arithmetic is unchanged. See [the follow-up measurements](SPECIFICATION.md#11-throughput-stall-investigation-and-follow-up-2026-10-22).
+The results below describe the earlier worker implementation and its 2,048 boundary.
+
 The default GPU verifier now spreads a signature across multiple GPU tasks for
 batches of up to 2,048 records. This reduces small-batch recovery latency and improves
 committed two-node TPS. CPU, GPU and HYBRID remain supported; GPU remains the default.

@@ -18,18 +18,21 @@ struct AdmissionJob {
 struct PeerServer {
     node: Arc<Mutex<Node>>,
     chain: u64,
+    store: Arc<crate::storage::Store>,
+    block_reads: Arc<Semaphore>,
     accepts_transactions: bool,
     verifier: Arc<crate::verification::Verifier>,
     admission: tokio::sync::mpsc::Sender<AdmissionJob>,
 }
 impl PeerServer {
     fn new(node: Arc<Mutex<Node>>) -> Result<Self> {
-        let (chain, verifier, accepts_transactions) = {
+        let (chain, verifier, accepts_transactions, store) = {
             let node = node.lock().map_err(cap_error)?;
             (
                 node.genesis.chain_id,
                 node.verifier.clone(),
                 node.config.sync_peer.is_none(),
+                node.store.clone(),
             )
         };
         let (admission, mut queue) = tokio::sync::mpsc::channel::<AdmissionJob>(2);
@@ -62,12 +65,33 @@ impl PeerServer {
         });
         Ok(Self {
             node,
+            store,
+            block_reads: Arc::new(Semaphore::new(2)),
             chain,
             accepts_transactions,
             verifier,
             admission,
         })
     }
+}
+// Bound active disk jobs and retained responses per connection. Cancellation
+// cannot release capacity while a blocking read is still running: the job owns
+// the permit and returns it alongside the bytes until response construction ends.
+async fn read_blocks(
+    store: Arc<crate::storage::Store>,
+    permits: Arc<Semaphore>,
+    start: u64,
+    limit: u32,
+) -> Result<(tokio::sync::OwnedSemaphorePermit, Vec<crate::types::Block>), capnp::Error> {
+    let permit = permits.acquire_owned().await.map_err(cap_error)?;
+    tokio::task::spawn_blocking(move || {
+        store
+            .block_batch(start, limit)
+            .map(|blocks| (permit, blocks))
+    })
+    .await
+    .map_err(cap_error)?
+    .map_err(cap_error)
 }
 fn cap_error(error: impl std::fmt::Display) -> capnp::Error {
     capnp::Error::failed(error.to_string())
@@ -306,84 +330,62 @@ impl peer::Server for PeerServer {
         params: peer::GetBlockParams,
         mut results: peer::GetBlockResults,
     ) -> Promise<(), capnp::Error> {
-        let result = (|| {
-            let height = params.get()?.get_height();
-            let node = self.node.lock().map_err(cap_error)?;
-            let block = node.store.block(height).map_err(cap_error)?;
-            results.get().set_found(block.is_some());
-            if let Some(block) = block {
-                fill_block(results.get().init_block(), &block).map_err(cap_error)?;
+        let height = match params.get() {
+            Ok(params) => params.get_height(),
+            Err(error) => return Promise::err(error),
+        };
+        let store = self.store.clone();
+        let permits = self.block_reads.clone();
+        Promise::from_future(async move {
+            let (_permit, blocks) = read_blocks(store, permits, height, 1).await?;
+            results.get().set_found(!blocks.is_empty());
+            if let Some(block) = blocks.first() {
+                fill_block(results.get().init_block(), block).map_err(cap_error)?;
             }
             Ok(())
-        })();
-        Promise::from_future(async move { result })
+        })
     }
     fn get_blocks(
         &mut self,
         params: peer::GetBlocksParams,
         mut results: peer::GetBlocksResults,
     ) -> Promise<(), capnp::Error> {
-        let result = (|| {
-            let params = params.get()?;
-            let limit = params.get_limit().min(64) as u64;
-            let start = params.get_start();
-            let node = self.node.lock().map_err(cap_error)?;
-            let mut blocks = Vec::new();
-            let mut bytes = 0;
-            for offset in 0..limit {
-                let height = start
-                    .checked_add(offset)
-                    .ok_or_else(|| cap_error("height overflow"))?;
-                let Some(block) = node.store.block(height).map_err(cap_error)? else {
-                    break;
-                };
-                let size = block.as_bytes().len();
-                if !blocks.is_empty() && bytes + size > 2 * 1024 * 1024 {
-                    break;
-                }
-                bytes += size;
-                blocks.push(block);
-            }
+        let (start, limit) = match params.get() {
+            Ok(params) => (params.get_start(), params.get_limit()),
+            Err(error) => return Promise::err(error),
+        };
+        let store = self.store.clone();
+        let permits = self.block_reads.clone();
+        Promise::from_future(async move {
+            let (_permit, blocks) = read_blocks(store, permits, start, limit).await?;
             let mut output = results.get().init_blocks(blocks.len() as u32);
             for (index, block) in blocks.iter().enumerate() {
                 fill_block(output.reborrow().get(index as u32), block).map_err(cap_error)?;
             }
             Ok(())
-        })();
-        Promise::from_future(async move { result })
+        })
     }
     fn get_encoded_blocks(
         &mut self,
         params: peer::GetEncodedBlocksParams,
         mut results: peer::GetEncodedBlocksResults,
     ) -> Promise<(), capnp::Error> {
-        let result = (|| {
-            let params = params.get()?;
-            let limit = params.get_limit().min(64) as u64;
-            let node = self.node.lock().map_err(cap_error)?;
-            let mut blocks = Vec::new();
-            let mut bytes = 0;
-            for offset in 0..limit {
-                let height = params
-                    .get_start()
-                    .checked_add(offset)
-                    .ok_or_else(|| cap_error("height overflow"))?;
-                let Some(block) = node.store.block(height).map_err(cap_error)? else {
-                    break;
-                };
-                if !blocks.is_empty() && bytes + block.as_bytes().len() > 2 * 1024 * 1024 {
-                    break;
-                }
-                bytes += block.as_bytes().len();
-                blocks.push(block);
-            }
+        let (start, limit) = match params.get() {
+            Ok(params) => (params.get_start(), params.get_limit()),
+            Err(error) => return Promise::err(error),
+        };
+        let store = self.store.clone();
+        let permits = self.block_reads.clone();
+        Promise::from_future(async move {
+            // Only owned, Send values cross onto the blocking worker. The
+            // Capnp response stays on its local executor and holds no Node lock.
+            let (_permit, blocks) = read_blocks(store, permits, start, limit).await?;
             let mut output = results.get().init_blocks(blocks.len() as u32);
             for (i, block) in blocks.iter().enumerate() {
                 output.set(i as u32, block.as_bytes());
             }
             Ok(())
-        })();
-        Promise::from_future(async move { result })
+        })
     }
 }
 

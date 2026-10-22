@@ -23,7 +23,7 @@ pub struct Indexer {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
-// Bound catch-up memory and lock hold time. A single large block is never split:
+// Bound catch-up memory. A single large block is never split:
 // rows, counters, and the height cursor commit in the same SQLite transaction.
 const INDEX_BATCH_BLOCKS: usize = 16;
 const INDEX_BATCH_BYTES: usize = 8 * 1024 * 1024;
@@ -91,28 +91,66 @@ fn index_block(db: &Connection, block: &Block) -> Result<()> {
     Ok(())
 }
 
-fn step(db: &mut Connection, node: &Arc<Mutex<Node>>, data: &Path) -> Result<bool> {
-    let next = (meta(db, "height")? + 1) as u64;
-    // Read a bounded batch under the node lock; SQLite work never holds it.
-    let (blocks, earliest) = {
-        let node = node
-            .lock()
-            .map_err(|_| anyhow::anyhow!("node unavailable"))?;
-        let earliest = node.store.earliest_height()?;
-        let mut blocks = Vec::new();
-        let mut bytes = 0;
-        for height in next.max(earliest).. {
-            let Some(block) = node.store.block(height)? else {
-                break;
-            };
-            bytes += block.as_bytes().len();
-            blocks.push(block);
-            if blocks.len() >= INDEX_BATCH_BLOCKS || bytes >= INDEX_BATCH_BYTES {
-                break;
-            }
-        }
-        (blocks, earliest)
+// Keep each cleanup transaction bounded; readers continue using WAL snapshots.
+fn prune_index(
+    db: &mut Connection,
+    earliest: u64,
+    retention: &crate::config::Retention,
+) -> Result<bool> {
+    let crate::config::Retention::Pruned { seconds } = retention else {
+        return Ok(false);
     };
+    let tx = db.transaction()?;
+    let heights = {
+        let mut stmt = tx.prepare(
+            "SELECT height,transaction_count FROM blocks WHERE height<?1 ORDER BY height LIMIT 16",
+        )?;
+        let rows = stmt.query_map([earliest], |r| {
+            Ok((r.get::<_, u64>(0)?, r.get::<_, u64>(1)?))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (height, count) in &heights {
+        tx.execute("DELETE FROM transactions WHERE height=?1", [height])?;
+        tx.execute("DELETE FROM blocks WHERE height=?1", [height])?;
+        tx.execute(
+            "UPDATE meta SET value=MAX(0,value-?1) WHERE key='transactions'",
+            [count],
+        )?;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    tx.execute("INSERT OR IGNORE INTO meta VALUES ('last_log_prune',0)", [])?;
+    let last = meta(&tx, "last_log_prune")? as u64;
+    let mut deleted = 0;
+    if now > last {
+        deleted = tx.execute(
+            "DELETE FROM logs WHERE rowid IN (SELECT rowid FROM logs WHERE CAST(timestamp_ms AS INTEGER) < ?1 LIMIT 1000)",
+            [now.saturating_sub(*seconds).saturating_mul(1000)])?;
+        tx.execute(
+            "UPDATE meta SET value=MAX(0,value-?1) WHERE key='logs'",
+            [deleted],
+        )?;
+        // Drain old backlogs in bounded batches before advancing the timer.
+        if deleted < 1000 {
+            tx.execute("UPDATE meta SET value=?1 WHERE key='last_log_prune'", [now])?;
+        }
+    }
+    tx.commit()?;
+    Ok(!heights.is_empty() || deleted > 0)
+}
+
+fn step(
+    db: &mut Connection,
+    store: &crate::storage::Store,
+    retention: &crate::config::Retention,
+    data: &Path,
+) -> Result<bool> {
+    let next = (meta(db, "height")? + 1) as u64;
+    // Snapshot reads and validation never hold the execution mutex. A concurrent
+    // prune cannot remove records from this batch or change its earliest height.
+    let (earliest, blocks) = store.index_batch(next, INDEX_BATCH_BLOCKS, INDEX_BATCH_BYTES)?;
     let offset = meta(db, "log_offset")? as u64;
     let mut logs = Vec::new();
     let mut end = offset;
@@ -139,9 +177,10 @@ fn step(db: &mut Connection, node: &Arc<Mutex<Node>>, data: &Path) -> Result<boo
             end = reader.stream_position()?;
         }
     }
+    let pruned = prune_index(db, earliest, retention)?;
     let changed = !blocks.is_empty() || !logs.is_empty();
     if !changed {
-        return Ok(false);
+        return Ok(pruned);
     }
     let tx = db.transaction()?;
     if earliest > next && !blocks.is_empty() {
@@ -176,6 +215,12 @@ fn step(db: &mut Connection, node: &Arc<Mutex<Node>>, data: &Path) -> Result<boo
 
 impl Indexer {
     pub fn start(node: Arc<Mutex<Node>>, data: PathBuf) -> Result<Self> {
+        let (store, retention) = {
+            let node = node
+                .lock()
+                .map_err(|_| anyhow::anyhow!("node unavailable"))?;
+            (node.store.clone(), node.config.retention.clone())
+        };
         let mut db = open_writer(&data.join("index.sqlite"))?;
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
@@ -183,7 +228,7 @@ impl Indexer {
             .name("sfc-sqlite-index".into())
             .spawn(move || {
                 while !stopping.load(Ordering::Relaxed) {
-                    match step(&mut db, &node, &data) {
+                    match step(&mut db, &store, &retention, &data) {
                         Ok(true) => continue,
                         Ok(false) => (),
                         Err(error) => {
@@ -200,7 +245,7 @@ impl Indexer {
                     thread::sleep(Duration::from_millis(100));
                 }
                 // Bounded final pass; any remaining backlog resumes from durable cursors next startup.
-                let _ = step(&mut db, &node, &data);
+                let _ = step(&mut db, &store, &retention, &data);
                 let _ = db.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");
             })?;
         Ok(Self {
@@ -375,4 +420,31 @@ pub fn search(data: &Path, query: &Query) -> Result<Value> {
         "database":data.join("index.sqlite")});
     db.execute_batch("COMMIT")?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+    #[test]
+    fn indexed_logs_expire_but_archive_keeps_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = open_writer(&dir.path().join("index.sqlite")).unwrap();
+        db.execute("INSERT INTO logs(timestamp_ms,level,event,message,record) VALUES (1,'info','old','old',x'00')", []).unwrap();
+        db.execute("UPDATE meta SET value=1 WHERE key='logs'", [])
+            .unwrap();
+        assert!(!prune_index(&mut db, 0, &crate::config::Retention::Archive).unwrap());
+        assert_eq!(meta(&db, "logs").unwrap(), 1);
+        assert!(prune_index(
+            &mut db,
+            0,
+            &crate::config::Retention::Pruned { seconds: 60 }
+        )
+        .unwrap());
+        assert_eq!(meta(&db, "logs").unwrap(), 0);
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM logs", [], |r| r.get::<_, u64>(0))
+                .unwrap(),
+            0
+        );
+    }
 }

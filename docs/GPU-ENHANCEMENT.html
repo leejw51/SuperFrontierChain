@@ -1,0 +1,174 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Super Frontier Chain — architecture, protocol and measured performance."><title>GPU latency enhancement — 2026-10-20 · SFC</title><style>
+:root{color-scheme:dark;--bg:#080e19;--panel:#111b2a;--line:#243447;--ink:#eaf2fa;--muted:#a5b5c7;--mint:#8af0c3}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--mint);text-underline-offset:4px}a:hover{color:white}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}aside{position:fixed;inset:0 auto 0 0;width:270px;padding:30px 24px;border-right:1px solid var(--line);overflow:auto;background:#0b1320}aside img{width:220px;display:block;margin:0 0 22px}aside .caption,.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;font-weight:700;color:var(--mint)}nav a{display:block;text-decoration:none;color:var(--muted);font-size:13px;line-height:1.5;padding:9px 0}nav a.sub{padding-left:14px;font-size:12px}nav a:hover{color:var(--mint)}main{max-width:1220px;margin-left:270px;padding:60px clamp(24px,5vw,84px) 100px}header{border-bottom:1px solid var(--line);padding-bottom:36px;margin-bottom:40px}header .logo{width:min(560px,100%);display:block;margin-bottom:24px}.actions{display:flex;gap:12px;flex-wrap:wrap}.actions a{font-size:12px;border:1px solid var(--line);padding:6px 13px;border-radius:8px;text-decoration:none}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.04em;line-height:1.15;margin:12px 0 24px}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em;margin-top:58px;padding-top:12px}h3{font-size:19px;margin-top:30px}p,li{color:var(--muted)}strong{color:var(--ink)}li{padding:3px 0}code{font: .86em ui-monospace,SFMono-Regular,Consolas,monospace;background:#172335;border:1px solid #223349;border-radius:5px;padding:2px 5px;overflow-wrap:anywhere}pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;overflow:auto;line-height:1.55}pre code{background:none;border:0;padding:0;overflow-wrap:normal}.table-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:24px 0}table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.6}th{text-align:left;background:#192738;color:var(--mint)}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}td{color:var(--muted)}tr:last-child td{border-bottom:0}tr:hover td{background:#132033}.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:9px}.edge{display:grid;grid-template-columns:1fr .9fr 1fr;align-items:center;gap:12px;font-size:12px;line-height:1.5}.node{padding:10px 12px;border:1px solid #30465a;border-radius:8px;color:var(--ink);background:#0e1927}.arrow{text-align:center;color:var(--mint);font-size:11px}.arrow b{display:block;font-size:20px;line-height:1.2}details{margin-top:16px}summary{color:var(--mint);font-size:12px;cursor:pointer}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--muted)}.skip{position:absolute;top:-90px}.skip:focus{top:10px;left:290px;background:var(--panel);padding:10px;z-index:10}@media(max-width:900px){aside{position:static;width:auto;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}aside img{width:165px;margin:0}aside nav,aside .caption{display:none}main{margin:0;padding:30px 22px 60px}h2{margin-top:38px}.edge{grid-template-columns:1fr 70px 1fr;gap:6px}.flow{padding:12px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{aside,.actions,.skip{display:none}main{margin:0;padding:0;max-width:none}body{background:white;color:#111}p,li,td,footer{color:#333}h1,h2,h3,strong{color:#111}a{color:#175d49}pre,.flow,.node,th{background:#f4f7f8;color:#111}.table-scroll,pre,.flow{break-inside:avoid}header .logo{width:300px}}</style></head><body><a class="skip" href="#content">Skip to content</a><aside><a href="SPECIFICATION.html"><img src="assets/sfc-logo.png" alt="SFC — Super Frontier Chain"></a><p class="caption">On this page</p><nav aria-label="Table of contents"><a class="" href="#measured-changes">Measured changes</a><a class="" href="#implementation">Implementation</a><a class="" href="#validation-and-reproduction">Validation and reproduction</a></nav></aside><main id="content"><header><img class="logo" src="assets/sfc-logo.png" alt="Super Frontier Chain"><div class="eyebrow">Engineering documentation / SFC</div><p>Architecture. Execution. Evidence.</p><div class="actions"><a href="GPU-ENHANCEMENT.md">Markdown source ↗</a><a href="SPECIFICATION.html">Specification</a><a href="EXECUTION-ALLOCATION-BENCHMARK.html">Benchmarks</a><a href="ETHEREUM.html">Ethereum compatibility</a></div></header><article><h1 id="gpu-latency-enhancement-2026-10-20">GPU latency enhancement — 2026-10-20</h1><p><strong>2026-10-22 update:</strong> the native Rust MLX path now uses cooperative recovery
+through 2,560 records, with direct recovery above that boundary. The kernel
+arithmetic is unchanged. See <a href="SPECIFICATION.html#11-throughput-stall-investigation-and-follow-up-2026-10-22">the follow-up measurements</a>.
+The results below describe the earlier worker implementation and its 2,048 boundary.</p>
+<p>The default GPU verifier now spreads a signature across multiple GPU tasks for
+batches of up to 2,048 records. This reduces small-batch recovery latency and improves
+committed two-node TPS. CPU, GPU and HYBRID remain supported; GPU remains the default.</p>
+<h2 id="measured-changes">Measured changes</h2><p>Apple M5 Max, 18 logical CPUs, macOS 27.0.1, MLX 0.32.4. The previous optimized
+worker is preserved under <code>experiments/mlx_ecdsa/reference_node/</code>. These comparisons
+use the same Rust executable and change only the GPU worker/kernel implementation.</p>
+<p>Full GPU recovery includes input packing, dispatch, synchronization and output
+unpacking. Seven trials of three iterations rotate before/after order using a fixed
+random seed. All returned keys are compared with CPU fixtures.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Signatures per batch</th>
+<th align="right">Previous latency</th>
+<th align="right">Enhanced latency</th>
+<th align="right">Reduction</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td align="right">7.577 ms</td>
+<td align="right">4.928 ms</td>
+<td align="right">35.0%</td>
+</tr>
+<tr>
+<td>100</td>
+<td align="right">7.844 ms</td>
+<td align="right">5.042 ms</td>
+<td align="right">35.7%</td>
+</tr>
+<tr>
+<td>1,024</td>
+<td align="right">8.101 ms</td>
+<td align="right">5.581 ms</td>
+<td align="right">31.1%</td>
+</tr>
+<tr>
+<td>2,048</td>
+<td align="right">8.323 ms</td>
+<td align="right">6.888 ms</td>
+<td align="right">17.2%</td>
+</tr>
+<tr>
+<td>4,096</td>
+<td align="right">8.863 ms</td>
+<td align="right">8.915 ms</td>
+<td align="right">unchanged within run variation</td>
+</tr>
+<tr>
+<td>65,536</td>
+<td align="right">75.787 ms</td>
+<td align="right">76.028 ms</td>
+<td align="right">unchanged within run variation</td>
+</tr>
+</tbody></table></div>
+<p>The network benchmark runs a sequencer and follower with HTTP JSON-RPC submission,
+HTTP/3 replay, signature checks, EVM execution and synchronous RocksDB WAL commits.
+It checks the follower&#39;s ending receipt, balances, nonces and matching block/state
+roots. Normal mempool backpressure and retries are included. These are short bursts,
+not a sustained long-duration capacity test.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Workload</th>
+<th align="right">Previous committed TPS</th>
+<th align="right">Enhanced committed TPS</th>
+<th align="right">Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>16,384 transfers, 100/request batch; five paired trials</td>
+<td align="right">9,623</td>
+<td align="right">12,456</td>
+<td align="right"><strong>+29.4%</strong></td>
+</tr>
+<tr>
+<td>65,536 transfers, 4,096/request batch; three paired trials</td>
+<td align="right">38,126</td>
+<td align="right">38,410</td>
+<td align="right">approximately unchanged</td>
+</tr>
+</tbody></table></div>
+<p>Small-batch TPS ranged from 9,552–9,642 before and 12,300–13,711 after. All five
+paired trials improved. Large-batch ranges overlap substantially (37,958–40,660
+before; 37,499–40,580 after). The default 100 ms cadence and 4,096-transaction block
+limit target a 40,960 TPS ceiling, so the larger workload is already near that bound.</p>
+<p>CPU accounting includes <strong>both Rust nodes and both MLX workers</strong>, excluding the
+load generator. 100% means one CPU core. It uses cumulative process user+system CPU
+time with macOS <code>ps</code>&#39;s 10 ms resolution, sampled around each timed interval.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Workload</th>
+<th align="right">Previous host CPU</th>
+<th align="right">Enhanced host CPU</th>
+<th align="right">Previous CPU ms/tx</th>
+<th align="right">Enhanced CPU ms/tx</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>100/request batch</td>
+<td align="right">45.2%</td>
+<td align="right">60.1%</td>
+<td align="right">0.0470</td>
+<td align="right">0.0446</td>
+</tr>
+<tr>
+<td>4,096/request batch</td>
+<td align="right">113.5%</td>
+<td align="right">113.7%</td>
+<td align="right">0.0298</td>
+<td align="right">0.0301</td>
+</tr>
+</tbody></table></div>
+<p>Each column is a separately calculated median. CPU utilization increases on the
+small-batch workload because the nodes process more transactions per second;
+median CPU time per committed transaction falls about 5.2%. Large-batch CPU cost
+is essentially unchanged. This does not measure GPU utilization, power or energy.
+The enhancement does not establish that GPU beats CPU for small batches.</p>
+<h2 id="implementation">Implementation</h2><p>Profiling found that GPU execution took roughly 7.5–7.9 ms for 1–4,096 signatures,
+while packing/unpacking 100 records took about 0.1 ms combined. The long per-thread
+elliptic-curve calculation left much of the GPU idle on small batches.</p>
+<p>The cooperative path executes three dependent stages:</p>
+<ol>
+<li>Prepare scalar metadata and the curve-point lookup table independently, with
+disjoint writes. Separate SIMD groups handle the two tasks even for a singleton.</li>
+<li>Compute the generator term and the two signed GLV curve-point terms independently.</li>
+<li>Combine the three Jacobian points, then normalize the result to the same public
+key format as the previous implementation.</li>
+</ol>
+<p>The existing field/scalar arithmetic is unchanged. A Jacobian addition helper
+handles infinity, equal points, inverse points and general additions. There are no
+floating-point cryptographic operations or atomic updates. MLX dependencies order
+the stages; transaction results are still returned and applied in input order.</p>
+<p>Automatic selection depends only on batch size:</p>
+<ul>
+<li>1–2,048: cooperative path, optimized for latency.</li>
+<li>2,049–8,191: previous two-kernel direct path.</li>
+<li>8,192 and above: previous five-kernel batched path, used by large microbenchmarks.</li>
+</ul>
+<p>The node still bounds recovery batches at 4,096. HYBRID automatically benefits when
+its GPU portion falls in the cooperative range. The 2,048 crossover was measured on
+this M5 Max; other Apple GPUs may have different performance crossovers. GPU mode
+continues to recover transaction signatures entirely on GPU, with no CPU fallback.</p>
+<h2 id="validation-and-reproduction">Validation and reproduction</h2><p>Differential checks passed for 65,829 recovery vectors (65,610 accepted, 219 rejected)
+through all three kernel paths; 33,568 arithmetic comparisons; 10,008 GLV decompositions;
+and 2,051 Jacobian additions against an independent Python affine-point oracle.
+Repeated dispatches, invalid signatures, shuffled/duplicate records and boundaries
+at 2,047/2,048/2,049 are checked. This is consistency evidence on the tested device,
+not a cryptographic audit or proof across all GPU/compiler versions.</p>
+<p>The node checks cover CPU/GPU/HYBRID state and receipt equivalence, mixed-backend
+replay, worker kill/freeze/restart, sequencer/follower restart and cleanup. The 15
+network emergency scenarios also run against the enhanced GPU implementation.</p>
+<pre><code>make bench-mlx-latency
+make test-verification
+python3 scripts/test_emergencies.py
+
+# Paired full-network benchmark, same executable and frozen previous worker:
+python3 scripts/benchmark_network.py --backend gpu --rpc-batch 100 \
+  --transactions 16384 --repeat 5 --compare target/release/sfc \
+  --baseline-gpu-worker experiments/mlx_ecdsa/reference_node/worker.py</code></pre><p>Use <code>--rpc-batch 4096 --transactions 65536 --repeat 3</code> for the large-batch comparison.
+Raw reports include timings, validation and source/executable hashes:</p>
+<ul>
+<li><a href="gpu-enhancement-latency-2026-10-20.json">Recovery latency and correctness</a></li>
+<li><a href="gpu-enhancement-small-network-2026-10-20.jsonl">Small-batch network TPS and CPU</a></li>
+<li><a href="gpu-enhancement-large-network-2026-10-20.jsonl">Large-batch network TPS and CPU</a></li>
+<li><a href="gpu-enhancement-emergencies-2026-10-20.json">Emergency tests</a></li>
+</ul>
+</article><footer>Super Frontier Chain · Generated from GPU-ENHANCEMENT.md · Rebuild: npm run build:docs<br>Static, offline-readable documentation. No external scripts, fonts or trackers.</footer></main></body></html>

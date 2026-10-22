@@ -60,7 +60,7 @@ fn zero_retention_is_rejected_by_storage() {
 }
 
 #[test]
-fn history_writer_rolls_hours_and_prunes_without_losing_current_segment() {
+fn short_history_segments_prune_and_restart_removes_boundary_excess() {
     let dir = tempfile::tempdir().unwrap();
     let genesis = common::genesis();
     let store = Store::open(dir.path(), Retention::Pruned { seconds: 2 }, &genesis).unwrap();
@@ -82,9 +82,16 @@ fn history_writer_rolls_hours_and_prunes_without_losing_current_segment() {
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .collect();
-    assert_eq!(paths.len(), 1);
-    let blocks: Vec<sfc::types::Block> =
-        sfc::codec::read_all(&mut std::fs::File::open(&paths[0]).unwrap()).unwrap();
+    // At most one partial boundary segment survives until the next rotation.
+    assert_eq!(paths.len(), 2);
+    let mut blocks: Vec<sfc::types::Block> = paths
+        .iter()
+        .flat_map(|path| {
+            sfc::codec::read_all::<sfc::types::Block>(&mut std::fs::File::open(path).unwrap())
+                .unwrap()
+        })
+        .collect();
+    blocks.sort_by_key(|block| block.height());
     assert_eq!(
         blocks.iter().map(|b| b.height()).collect::<Vec<_>>(),
         vec![2, 3]
@@ -92,6 +99,11 @@ fn history_writer_rolls_hours_and_prunes_without_losing_current_segment() {
     let store = Store::open(dir.path(), Retention::Pruned { seconds: 2 }, &genesis).unwrap();
     assert_eq!(store.head().unwrap(), head);
     assert_eq!(store.world().unwrap(), world);
+    let paths: Vec<_> = std::fs::read_dir(dir.path().join("history"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(paths.len(), 1);
     let blocks: Vec<sfc::types::Block> =
         sfc::codec::read_all(&mut std::fs::File::open(&paths[0]).unwrap()).unwrap();
     assert_eq!(blocks, vec![head]);

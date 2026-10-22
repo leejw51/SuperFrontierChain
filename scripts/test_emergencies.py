@@ -106,7 +106,7 @@ class Network:
         self.until(lambda: self.height(0) >= 2 and self.height(1) >= 2)
 
     def configure(self, index, **fields):
-        path = self.home / f'node-{index}/config.capnp'
+        path = self.home / f'node-{index}/config.jsonl'
         config = codec.loads(path.read_bytes())
         config.update(fields)
         path.write_bytes(codec.dumps(config))

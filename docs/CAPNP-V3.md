@@ -1,9 +1,10 @@
 # Protocol v3 binary formats
 
-Protocol v3 starts a new chain. Default homes are `.sfc-v3`,
-`.sfc-testnet-v3`, and `.sfc-stress-v3`. The old `.sfc`, `.sfc-testnet`, and
-`.sfc-stress` and all `*-v2` directories are preserved. Block and state hashes changed, so these
-are separate histories even though the development Ethereum chain ID is still 7777.
+Default homes are `~/.superfrontierchain/node`, `~/.superfrontierchain/testnet`
+and `~/.superfrontierchain/stress`. Older repository-local homes are preserved.
+Protocol v1/v2 and earlier flat-state-hash chains require a fresh home: they are
+separate histories even though the development Ethereum chain ID is still 7777.
+See [Merkle commitment compatibility](MERKLE-TRIE.md) before reusing existing data.
 
 ## Encoding boundaries
 
@@ -12,8 +13,10 @@ are separate histories even though the development Ethereum chain ID is still 77
 | Ethereum HTTP RPC request/response | JSON-RPC |
 | Peer HTTP/3 and TCP RPC | Typed `chain.capnp`; `getEncodedBlocks` carries canonical block bytes |
 | GPU recovery IPC | Typed `runtime.capnp` request/response; packed UInt32 limbs and binary public keys |
-| Config, genesis, metadata, signing guard | Typed `runtime.capnp.Record` |
-| Runtime info, supervisor manifests/status, dynamic presentation/log fields | Cap’n Proto `Value` |
+| Node configuration | JSONL, one top-level field per line |
+| Genesis, metadata, signing guard | Typed `runtime.capnp.Record` |
+| Supervisor network manifest | JSONL, one node configuration per line |
+| Runtime info, supervisor status, dynamic presentation/log fields | Cap’n Proto `Value` |
 | RocksDB blocks, accounts, world and SQLite headers/receipts | Typed canonical `storage.capnp` segments |
 | SQLite block, receipt and log payloads | Cap’n Proto BLOB |
 | SQLite search columns | Native SQL integers/text; signed Ethereum transactions are BLOBs |
@@ -33,10 +36,10 @@ encoding is gone. Dynamic dashboard/log fields still use the schema-defined `Val
 union directly; `serde_json::Value` is an in-memory presentation type, not JSON text.
 Historical index headers without gas metadata retain an unknown gas value (shown as a dash). New headers store the actual committed gas total.
 
-Serde deserialization remains only for reading the old binary Value representation
-during compatible metadata migration and in external test fixtures.
+Serde deserialization also reads editable JSONL configuration, legacy binary Value
+records during compatible metadata migration, and external test fixtures.
 
-The default native Rust/Metal GPU path uses reusable shared buffers directly,
+The default native Rust/MLX GPU path uses reusable shared buffers directly,
 without a Python worker, socket transport or Capnp wrapping. Rust writes 25
 little-endian UInt32 limbs per signature and reads 17-word results after GPU completion.
 It validates output statuses and SEC1 curve points before deriving addresses.
@@ -64,8 +67,9 @@ and historical benchmark reports are external tooling or archived artifacts.
 
 ## Hashes and bounds
 
-Object keys are sorted before encoding. Consensus hashes use canonical Cap’n Proto
-segment bytes, prefixed by `sfc/state/v3/capnp` or `sfc/block/v3/capnp`.
+Object keys are sorted before encoding. Block hashes use canonical Cap’n Proto
+segment bytes prefixed by `sfc/block/v3/capnp`. State roots use the incremental
+[Merkle Patricia commitment](MERKLE-TRIE.md) with canonical account segments.
 Blocks/accounts/world/receipts store raw canonical single segments. Other runtime
 records include the standard unpacked segment table. Block history frames hold raw
 segments; use `scripts/sfc_codec.py FILE --blocks` to inspect them.
@@ -84,21 +88,22 @@ writer repairs only an incomplete final frame before appending.
 ```sh
 make codec-setup          # Python Cap’n Proto tooling, including CPU-only hosts
 make mlx-setup            # optional legacy Python MLX worker only
-make stresstest          # fresh .sfc-stress-v3; continuous GPU release test
+make stresstest          # persistent default stress home; continuous GPU release test
 make stop
-python3 scripts/sfc_codec.py .sfc-stress-v3/node-0/config.capnp
-python3 scripts/sfc_codec.py .sfc-stress-v3/results.capnp --stream
-python3 scripts/sfc_codec.py .sfc-stress-v3/node-0/data/logs/node.capnp --stream
+python3 scripts/sfc_codec.py ~/.superfrontierchain/stress/node-0/config.jsonl
+python3 scripts/sfc_codec.py ~/.superfrontierchain/stress/results.capnp --stream
+python3 scripts/sfc_codec.py ~/.superfrontierchain/stress/node-0/data/logs/node.capnp --stream
 ```
 
-Edit a stopped node's binary configuration using the shared adapter:
+Edit a stopped node's `config.jsonl` directly, or use the shared adapter:
 
 ```sh
 target/mlx-venv/bin/python - <<'PY'
 import sys
+from pathlib import Path
 sys.path.insert(0, 'scripts')
 import sfc_codec as codec
-path = '.sfc-v3/config.capnp'
+path = Path.home() / '.superfrontierchain/node/config.jsonl'
 config = codec.read(path)
 config['verification']['backend'] = 'cpu'
 codec.write(path, config)
@@ -121,8 +126,9 @@ RocksDB schema 2 atomically upgrades genesis/head/version metadata after checkin
 the existing state commitment. Receipt-height keys written by older v3 binaries
 remain readable and are naturally replaced/pruned. Signer schema 2 validates and
 rewrites identity/vote records in one synchronous batch, retaining the double-sign
-guard. Configuration/genesis files upgrade through a synced temporary file and
-atomic rename. These upgrades do not change v3 block or state hashes. Unknown newer
+guard. Legacy `config.capnp` files remain readable; the node writes a JSONL companion
+when one is absent. Configuration writes and compatible genesis upgrades use a
+synced temporary file and atomic rename. These upgrades do not change v3 block or state hashes. Unknown newer
 versions fail without rewriting data. Protocol-v1/v2 chain histories remain separate.
 
 ## Validation and performance

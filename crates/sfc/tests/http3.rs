@@ -40,6 +40,8 @@ impl Server {
     fn start() -> Self {
         let home = tempfile::tempdir().unwrap();
         let mut config = common::config(home.path());
+        // Transport batching fixture spans 70 seconds; keep it independent of the 60s default.
+        config.retention = sfc::config::Retention::Pruned { seconds: 120 };
         config.peer_listen = "127.0.0.1:0".parse().unwrap();
         network::generate_identity(&config.tls_cert, &config.tls_key).unwrap();
         let endpoint = network::endpoint(&config).unwrap();

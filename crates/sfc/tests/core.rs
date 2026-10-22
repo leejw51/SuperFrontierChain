@@ -96,7 +96,7 @@ fn transfer_is_durable_and_replay_is_rejected() {
     assert_eq!(store.world().unwrap(), world);
     let path = dir
         .path()
-        .join(format!("history/{:020}.capnp", block.timestamp() / 3600));
+        .join(format!("history/{:020}.capnp", block.timestamp() / 60));
     assert!(path.exists());
     drop(store);
     std::fs::write(&path, b"torn").unwrap();
@@ -131,14 +131,14 @@ fn prune_by_time_preserves_state_boundary_and_archive() {
             .execute_block(
                 &first,
                 &world,
-                first.timestamp() + WEEK,
+                first.timestamp() + 60,
                 genesis.gas_limit,
                 &[],
             )
             .unwrap();
         store.commit(&second, &world).unwrap();
         store.maintain().unwrap();
-        assert!(store.block(1).unwrap().is_some()); // Exactly one week remains.
+        assert!(store.block(1).unwrap().is_some()); // Exactly 60 seconds remains.
         let (third, world) = app
             .execute_block(
                 &second,

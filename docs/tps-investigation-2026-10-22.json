@@ -1,0 +1,5977 @@
+{
+  "date": "2026-10-22",
+  "hardware": "Apple M5 Max, 32 GPU cores, 18 CPU cores, 36 GB RAM",
+  "final_changes": [
+    "History projection fsync on segment close/clean shutdown; no periodic 100 ms / 8 MiB projection fsync. RocksDB synchronous WAL unchanged.",
+    "SQLite indexer reads a consistent bounded RocksDB snapshot without the Node mutex.",
+    "Native MLX cooperative crossover 2048 -> 2560; arithmetic and 4096-record direct path unchanged."
+  ],
+  "baseline": "Candidate at start of this investigation, including the previous Capnp/local-validation/shared-hash/async block-read changes; not a clean Git commit.",
+  "final_method": "Four before/after pairs; order AB, BA, AB, BA. Rust release, MLX native, 1048576 transfers, rpc_batch 4096, inflight 1, interval 10 ms, TCP, one node, SQLite ON, 12 Rayon threads. Signing/preparation excluded; verification, execution and durable commit included. SQLite catch-up measured separately. No diagnostic probes in either final binary.",
+  "final_trials": [
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.0529595,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e494c8d30d23d3ed27f06da280c6202a21875ec128333344e1e9e43860247f1e",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010037422180175781,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 259.22091169521156,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.525,
+          "total_cpu_seconds": 10.525
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 9.748052333,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.22799999999999798,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002536666,
+      "rpc_batch": 4096,
+      "seconds": 4.060243416,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792633722.141651,
+      "total_cpu_percent_one_core_100": 259.22091169521156,
+      "total_cpu_seconds": 10.525,
+      "tps": 258254.46717502913,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "before",
+      "pair": 1,
+      "sha256": "0666846b7df89a6f27e6a482938907c95578c96632f766f206f48d75e75b1ef0"
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 3.8639152919999997,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "89f8d5281fddcc979f52d363876594d8c39b4f7f7b3d1d3421a31f560c893cdb",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.00985527038574219,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 266.7002400304999,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.334000000000001,
+          "total_cpu_seconds": 10.334000000000001
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 9.579387125,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.22699999999999676,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002908709,
+      "rpc_batch": 4096,
+      "seconds": 3.874762167,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792633737.799118,
+      "total_cpu_percent_one_core_100": 266.7002400304999,
+      "total_cpu_seconds": 10.334000000000001,
+      "tps": 270616.8675152133,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "after",
+      "pair": 1,
+      "sha256": "78918a73123cba2415cdf6bd1671e618ee14949352d5ba3c6e6e05f8e9a4b69c"
+    },
+    {
+      "admission_attempts": 1060864,
+      "admission_seconds": 4.830124459,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "89f8d5281fddcc979f52d363876594d8c39b4f7f7b3d1d3421a31f560c893cdb",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.011832237243652344,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 254.14770873509076,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1060864,
+          "role": "sequencer",
+          "rust_cpu_seconds": 12.407,
+          "total_cpu_seconds": 12.407
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 8.886877916,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.24299999999999855,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.00250025,
+      "rpc_batch": 4096,
+      "seconds": 4.88180675,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792633754.277896,
+      "total_cpu_percent_one_core_100": 254.14770873509076,
+      "total_cpu_seconds": 12.407,
+      "tps": 214792.60726574235,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "after",
+      "pair": 2,
+      "sha256": "78918a73123cba2415cdf6bd1671e618ee14949352d5ba3c6e6e05f8e9a4b69c"
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.981769375,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e494c8d30d23d3ed27f06da280c6202a21875ec128333344e1e9e43860247f1e",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.01032257080078125,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 216.71678653804912,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.824,
+          "total_cpu_seconds": 10.824
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.502188166,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.24200000000000088,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.0026845,
+      "rpc_batch": 4096,
+      "seconds": 4.994536959,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792633770.164091,
+      "total_cpu_percent_one_core_100": 216.71678653804912,
+      "total_cpu_seconds": 10.824,
+      "tps": 209944.58717749573,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "before",
+      "pair": 2,
+      "sha256": "0666846b7df89a6f27e6a482938907c95578c96632f766f206f48d75e75b1ef0"
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.099349625,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e494c8d30d23d3ed27f06da280c6202a21875ec128333344e1e9e43860247f1e",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010005950927734375,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 255.48027083778112,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.491999999999999,
+          "total_cpu_seconds": 10.491999999999999
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 9.577029542,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.22900000000000276,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002515167,
+      "rpc_batch": 4096,
+      "seconds": 4.106775042,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792633786.5794,
+      "total_cpu_percent_one_core_100": 255.48027083778112,
+      "total_cpu_seconds": 10.491999999999999,
+      "tps": 255328.32679565117,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "before",
+      "pair": 3,
+      "sha256": "0666846b7df89a6f27e6a482938907c95578c96632f766f206f48d75e75b1ef0"
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 3.8838935,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "89f8d5281fddcc979f52d363876594d8c39b4f7f7b3d1d3421a31f560c893cdb",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.009912490844726562,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 266.8782498520199,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.394,
+          "total_cpu_seconds": 10.394
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 9.67420775,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.22799999999999798,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002442542,
+      "rpc_batch": 4096,
+      "seconds": 3.894659833,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792633801.975441,
+      "total_cpu_percent_one_core_100": 266.8782498520199,
+      "total_cpu_seconds": 10.394,
+      "tps": 269234.2964372057,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "after",
+      "pair": 3,
+      "sha256": "78918a73123cba2415cdf6bd1671e618ee14949352d5ba3c6e6e05f8e9a4b69c"
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 3.9095259589999998,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "89f8d5281fddcc979f52d363876594d8c39b4f7f7b3d1d3421a31f560c893cdb",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010020256042480469,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 268.247460961893,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.507,
+          "total_cpu_seconds": 10.507
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 9.851933334,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.2309999999999981,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002425292,
+      "rpc_batch": 4096,
+      "seconds": 3.916905667,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792633817.550435,
+      "total_cpu_percent_one_core_100": 268.247460961893,
+      "total_cpu_seconds": 10.507,
+      "tps": 267705.19617928803,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "after",
+      "pair": 4,
+      "sha256": "78918a73123cba2415cdf6bd1671e618ee14949352d5ba3c6e6e05f8e9a4b69c"
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.910180958,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e494c8d30d23d3ed27f06da280c6202a21875ec128333344e1e9e43860247f1e",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010316848754882812,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 219.98242677561905,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.818,
+          "total_cpu_seconds": 10.818
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.213212958,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23000000000000043,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002293708,
+      "rpc_batch": 4096,
+      "seconds": 4.917665542,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792633834.325678,
+      "total_cpu_percent_one_core_100": 219.98242677561905,
+      "total_cpu_seconds": 10.818,
+      "tps": 213226.3756134882,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "before",
+      "pair": 4,
+      "sha256": "0666846b7df89a6f27e6a482938907c95578c96632f766f206f48d75e75b1ef0"
+    }
+  ],
+  "final_pairs": [
+    {
+      "pair": 1,
+      "before_tps": 258254.46717502913,
+      "after_tps": 270616.8675152133,
+      "change_percent": 4.786906679839031
+    },
+    {
+      "pair": 2,
+      "before_tps": 209944.58717749573,
+      "after_tps": 214792.60726574235,
+      "change_percent": 2.309190321800436
+    },
+    {
+      "pair": 3,
+      "before_tps": 255328.32679565117,
+      "after_tps": 269234.2964372057,
+      "change_percent": 5.446308999895644
+    },
+    {
+      "pair": 4,
+      "before_tps": 213226.3756134882,
+      "after_tps": 267705.19617928803,
+      "change_percent": 25.54975687649106
+    }
+  ],
+  "final_summary": {
+    "before": {
+      "median_tps": 234277.35120456968,
+      "min_tps": 209944.58717749573,
+      "max_tps": 258254.46717502913,
+      "median_cpu_us_per_tx": 10.177135467529297,
+      "median_index_catchup_seconds": 9.9806326455
+    },
+    "after": {
+      "median_tps": 268469.74630824686,
+      "min_tps": 214792.60726574235,
+      "max_tps": 270616.8675152133,
+      "median_cpu_us_per_tx": 9.966373443603516,
+      "median_index_catchup_seconds": 9.6267974375
+    }
+  },
+  "median_paired_tps_improvement_percent": 5.116607839867338,
+  "ratio_of_median_tps_improvement_percent": 14.594835961680541,
+  "trace_method": "Separate temporary builds; in-memory monotonic timestamp rows flushed after measurement on process exit. Phase statistics cover first 4096-record verification start through last verification completion, so the last commit can be outside the window. Phases overlap and must not be added as wall time.",
+  "initial_traced_trials": [
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.048997208,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e8aa421922fdceb769e500c62b18e948404cb1e09691985774e788f8a6d5b303",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010114669799804688,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 261.46728506044605,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.606,
+          "total_cpu_seconds": 10.606
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 9.976315833,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.24399999999999977,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002452375,
+      "rpc_batch": 4096,
+      "seconds": 4.056339208,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632117.171966,
+      "total_cpu_percent_one_core_100": 261.46728506044605,
+      "total_cpu_seconds": 10.606,
+      "tps": 258503.03592263086,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.924905625,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e8aa421922fdceb769e500c62b18e948404cb1e09691985774e788f8a6d5b303",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010367393493652344,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 220.2561540494858,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.871,
+          "total_cpu_seconds": 10.871
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.547502625,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23300000000000054,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.00093575,
+      "rpc_batch": 4096,
+      "seconds": 4.935616917,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632132.431485,
+      "total_cpu_percent_one_core_100": 220.2561540494858,
+      "total_cpu_seconds": 10.871,
+      "tps": 212450.8481175546,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 2
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.959516541,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e8aa421922fdceb769e500c62b18e948404cb1e09691985774e788f8a6d5b303",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010296821594238281,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 217.37291683344313,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.797,
+          "total_cpu_seconds": 10.797
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.543942042,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.22900000000000276,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.000859791,
+      "rpc_batch": 4096,
+      "seconds": 4.9670401250000005,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632148.25966,
+      "total_cpu_percent_one_core_100": 217.37291683344313,
+      "total_cpu_seconds": 10.797,
+      "tps": 211106.8108192502,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 3
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 5.05902775,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e8aa421922fdceb769e500c62b18e948404cb1e09691985774e788f8a6d5b303",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010437965393066406,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 216.02117045523343,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.945,
+          "total_cpu_seconds": 10.945
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.367239,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23200000000000287,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.001406167,
+      "rpc_batch": 4096,
+      "seconds": 5.066633042,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632164.179379,
+      "total_cpu_percent_one_core_100": 216.02117045523343,
+      "total_cpu_seconds": 10.945,
+      "tps": 206957.1629340035,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 4
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 5.039145833,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e8aa421922fdceb769e500c62b18e948404cb1e09691985774e788f8a6d5b303",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010433197021484377,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 216.77242635033127,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.940000000000001,
+          "total_cpu_seconds": 10.940000000000001
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.320407792,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.2339999999999982,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.001685834,
+      "rpc_batch": 4096,
+      "seconds": 5.046767333,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632180.138756,
+      "total_cpu_percent_one_core_100": 216.77242635033127,
+      "total_cpu_seconds": 10.940000000000001,
+      "tps": 207771.81328402643,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 5
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 5.547205667,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "e8aa421922fdceb769e500c62b18e948404cb1e09691985774e788f8a6d5b303",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.011444091796875,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 215.9430466280681,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 12.0,
+          "total_cpu_seconds": 12.0
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 9.555613667,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23000000000000043,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.000940416,
+      "rpc_batch": 4096,
+      "seconds": 5.557020792,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632196.307545,
+      "total_cpu_percent_one_core_100": 215.9430466280681,
+      "total_cpu_seconds": 12.0,
+      "tps": 188693.9133842276,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 6
+    }
+  ],
+  "initial_trace_summaries": [
+    {
+      "trace": "/tmp/sfc-tps-investigation-20261022/traces-default/15573.jsonl",
+      "full_verification_batches": 256,
+      "empty_blocks": 134,
+      "phase_duration_ms": {
+        "admit": {
+          "all": {
+            "count": 255,
+            "sum": 944.355833,
+            "mean": 3.7033562078431372,
+            "median": 3.652625,
+            "p95": 3.915042,
+            "max": 5.045708
+          }
+        },
+        "admit_wait": {
+          "all": {
+            "count": 255,
+            "sum": 360.520177,
+            "mean": 1.4138046156862745,
+            "median": 0.265916,
+            "p95": 5.399875,
+            "max": 8.489667
+          }
+        },
+        "commit": {
+          "all": {
+            "count": 389,
+            "sum": 1129.596341,
+            "mean": 2.9038466349614396,
+            "median": 3.750625,
+            "p95": 5.267,
+            "max": 6.017834
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1116.736008,
+            "mean": 4.379356894117647,
+            "median": 4.484125,
+            "p95": 5.339792,
+            "max": 6.017834
+          }
+        },
+        "postcommit": {
+          "all": {
+            "count": 388,
+            "sum": 284.070278,
+            "mean": 0.7321398917525773,
+            "median": 0.426688,
+            "p95": 4.176709,
+            "max": 6.106166
+          },
+          "nonempty": {
+            "count": 254,
+            "sum": 247.60824,
+            "mean": 0.9748355905511811,
+            "median": 0.480292,
+            "p95": 4.624875,
+            "max": 6.106166
+          }
+        },
+        "prepare": {
+          "all": {
+            "count": 389,
+            "sum": 1137.388162,
+            "mean": 2.9238770231362468,
+            "median": 4.356125,
+            "p95": 4.608958,
+            "max": 5.749708
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1133.796372,
+            "mean": 4.446260282352942,
+            "median": 4.471542,
+            "p95": 4.626167,
+            "max": 5.749708
+          }
+        },
+        "produce_log": {
+          "all": {
+            "count": 388,
+            "sum": 34.804601,
+            "mean": 0.08970257989690722,
+            "median": 0.0887915,
+            "p95": 0.122334,
+            "max": 0.444875
+          },
+          "nonempty": {
+            "count": 254,
+            "sum": 24.044968,
+            "mean": 0.09466522834645669,
+            "median": 0.093062,
+            "p95": 0.126375,
+            "max": 0.444875
+          }
+        },
+        "produce_wait": {
+          "all": {
+            "count": 389,
+            "sum": 458.635327,
+            "mean": 1.1790111233933163,
+            "median": 0.000125,
+            "p95": 3.665167,
+            "max": 5.918125
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 446.761617,
+            "mean": 1.7520063411764706,
+            "median": 1.543458,
+            "p95": 3.691959,
+            "max": 5.918125
+          }
+        },
+        "rpc_finish": {
+          "all": {
+            "count": 255,
+            "sum": 7.433788,
+            "mean": 0.029152109803921567,
+            "median": 0.028125,
+            "p95": 0.034875,
+            "max": 0.056541
+          }
+        },
+        "tick": {
+          "all": {
+            "count": 389,
+            "sum": 0.019237999999999998,
+            "mean": 4.945501285347044e-05,
+            "median": 4.2e-05,
+            "p95": 8.4e-05,
+            "max": 0.000208
+          }
+        },
+        "verify": {
+          "all": {
+            "count": 256,
+            "sum": 2425.430658,
+            "mean": 9.4743385078125,
+            "median": 9.4657915,
+            "p95": 9.71375,
+            "max": 10.114291
+          }
+        },
+        "verify_dispatch": {
+          "all": {
+            "count": 255,
+            "sum": 1.828759,
+            "mean": 0.007171603921568627,
+            "median": 0.007125,
+            "p95": 0.010708,
+            "max": 0.0155
+          }
+        }
+      }
+    },
+    {
+      "trace": "/tmp/sfc-tps-investigation-20261022/traces-default/15590.jsonl",
+      "full_verification_batches": 256,
+      "empty_blocks": 141,
+      "phase_duration_ms": {
+        "admit": {
+          "all": {
+            "count": 255,
+            "sum": 956.437166,
+            "mean": 3.7507339843137255,
+            "median": 3.668333,
+            "p95": 4.236959,
+            "max": 5.659666
+          }
+        },
+        "admit_wait": {
+          "all": {
+            "count": 255,
+            "sum": 1174.860541,
+            "mean": 4.607296239215686,
+            "median": 0.327042,
+            "p95": 26.389959,
+            "max": 127.1305
+          }
+        },
+        "commit": {
+          "all": {
+            "count": 396,
+            "sum": 1230.589791,
+            "mean": 3.1075499772727273,
+            "median": 3.7517505,
+            "p95": 5.375541,
+            "max": 101.531334
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1216.913824,
+            "mean": 4.772211074509804,
+            "median": 4.554458,
+            "p95": 5.44,
+            "max": 101.531334
+          }
+        },
+        "postcommit": {
+          "all": {
+            "count": 396,
+            "sum": 995.585536,
+            "mean": 2.514104888888889,
+            "median": 0.4193125,
+            "p95": 13.959667,
+            "max": 66.538584
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 957.269624,
+            "mean": 3.753998525490196,
+            "median": 0.4785,
+            "p95": 25.372959,
+            "max": 66.538584
+          }
+        },
+        "prepare": {
+          "all": {
+            "count": 396,
+            "sum": 1129.780251,
+            "mean": 2.8529804318181817,
+            "median": 4.266104,
+            "p95": 4.608292,
+            "max": 5.637166
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1125.910217,
+            "mean": 4.415334184313726,
+            "median": 4.397709,
+            "p95": 4.715,
+            "max": 5.637166
+          }
+        },
+        "produce_log": {
+          "all": {
+            "count": 396,
+            "sum": 38.544041,
+            "mean": 0.09733343686868687,
+            "median": 0.0917915,
+            "p95": 0.139834,
+            "max": 1.051125
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 26.615005,
+            "mean": 0.10437256862745098,
+            "median": 0.094584,
+            "p95": 0.147083,
+            "max": 1.051125
+          }
+        },
+        "produce_wait": {
+          "all": {
+            "count": 396,
+            "sum": 502.580322,
+            "mean": 1.2691422272727273,
+            "median": 0.0001455,
+            "p95": 3.822042,
+            "max": 14.495042
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 453.061663,
+            "mean": 1.7767124039215687,
+            "median": 1.426375,
+            "p95": 3.820625,
+            "max": 14.495042
+          }
+        },
+        "rpc_finish": {
+          "all": {
+            "count": 255,
+            "sum": 7.479369,
+            "mean": 0.029330858823529413,
+            "median": 0.028333,
+            "p95": 0.035333,
+            "max": 0.043334
+          }
+        },
+        "tick": {
+          "all": {
+            "count": 396,
+            "sum": 0.020994,
+            "mean": 5.301515151515151e-05,
+            "median": 4.2e-05,
+            "p95": 0.000125,
+            "max": 0.000208
+          }
+        },
+        "verify": {
+          "all": {
+            "count": 256,
+            "sum": 2486.539251,
+            "mean": 9.71304394921875,
+            "median": 9.4254785,
+            "p95": 10.744625,
+            "max": 19.086292
+          }
+        },
+        "verify_dispatch": {
+          "all": {
+            "count": 255,
+            "sum": 1.853662,
+            "mean": 0.007269262745098039,
+            "median": 0.007333,
+            "p95": 0.01075,
+            "max": 0.016333
+          }
+        }
+      }
+    },
+    {
+      "trace": "/tmp/sfc-tps-investigation-20261022/traces-default/15614.jsonl",
+      "full_verification_batches": 256,
+      "empty_blocks": 135,
+      "phase_duration_ms": {
+        "admit": {
+          "all": {
+            "count": 255,
+            "sum": 960.275249,
+            "mean": 3.7657852901960784,
+            "median": 3.685916,
+            "p95": 4.256791,
+            "max": 5.554875
+          }
+        },
+        "admit_wait": {
+          "all": {
+            "count": 255,
+            "sum": 1192.708555,
+            "mean": 4.6772884509803925,
+            "median": 0.318083,
+            "p95": 19.578916,
+            "max": 106.08475
+          }
+        },
+        "commit": {
+          "all": {
+            "count": 390,
+            "sum": 1141.163744,
+            "mean": 2.926060882051282,
+            "median": 3.851458,
+            "p95": 5.358375,
+            "max": 5.975708
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1127.563911,
+            "mean": 4.421819258823529,
+            "median": 4.53475,
+            "p95": 5.449959,
+            "max": 5.975708
+          }
+        },
+        "postcommit": {
+          "all": {
+            "count": 389,
+            "sum": 1105.016917,
+            "mean": 2.8406604550128534,
+            "median": 0.425,
+            "p95": 12.27325,
+            "max": 104.769583
+          },
+          "nonempty": {
+            "count": 254,
+            "sum": 1057.919337,
+            "mean": 4.165036759842519,
+            "median": 0.487646,
+            "p95": 18.822042,
+            "max": 104.769583
+          }
+        },
+        "prepare": {
+          "all": {
+            "count": 390,
+            "sum": 1130.070794,
+            "mean": 2.8976174205128205,
+            "median": 4.2976875,
+            "p95": 4.586666,
+            "max": 5.678833
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1126.143127,
+            "mean": 4.4162475568627455,
+            "median": 4.421917,
+            "p95": 4.604125,
+            "max": 5.678833
+          }
+        },
+        "produce_log": {
+          "all": {
+            "count": 389,
+            "sum": 35.802333,
+            "mean": 0.09203684575835476,
+            "median": 0.091333,
+            "p95": 0.123042,
+            "max": 0.45675
+          },
+          "nonempty": {
+            "count": 254,
+            "sum": 24.471994,
+            "mean": 0.09634643307086614,
+            "median": 0.0943125,
+            "p95": 0.13025,
+            "max": 0.45675
+          }
+        },
+        "produce_wait": {
+          "all": {
+            "count": 390,
+            "sum": 527.963124,
+            "mean": 1.3537516,
+            "median": 0.000167,
+            "p95": 3.967625,
+            "max": 12.013583
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 493.809456,
+            "mean": 1.9365076705882354,
+            "median": 2.3945,
+            "p95": 4.088417,
+            "max": 12.013583
+          }
+        },
+        "rpc_finish": {
+          "all": {
+            "count": 255,
+            "sum": 7.285421,
+            "mean": 0.02857027843137255,
+            "median": 0.027667,
+            "p95": 0.036334,
+            "max": 0.040666
+          }
+        },
+        "tick": {
+          "all": {
+            "count": 390,
+            "sum": 0.021332999999999998,
+            "mean": 5.47e-05,
+            "median": 4.2e-05,
+            "p95": 0.000125,
+            "max": 0.00025
+          }
+        },
+        "verify": {
+          "all": {
+            "count": 256,
+            "sum": 2504.531131,
+            "mean": 9.78332473046875,
+            "median": 9.419604,
+            "p95": 11.776375,
+            "max": 19.035334
+          }
+        },
+        "verify_dispatch": {
+          "all": {
+            "count": 255,
+            "sum": 1.863301,
+            "mean": 0.007307062745098039,
+            "median": 0.007333,
+            "p95": 0.010542,
+            "max": 0.016625
+          }
+        }
+      }
+    },
+    {
+      "trace": "/tmp/sfc-tps-investigation-20261022/traces-default/15636.jsonl",
+      "full_verification_batches": 256,
+      "empty_blocks": 135,
+      "phase_duration_ms": {
+        "admit": {
+          "all": {
+            "count": 255,
+            "sum": 957.545003,
+            "mean": 3.755078443137255,
+            "median": 3.675083,
+            "p95": 4.1045,
+            "max": 7.334084
+          }
+        },
+        "admit_wait": {
+          "all": {
+            "count": 255,
+            "sum": 1296.055711,
+            "mean": 5.0825714156862745,
+            "median": 0.308875,
+            "p95": 18.507042,
+            "max": 188.036791
+          }
+        },
+        "commit": {
+          "all": {
+            "count": 390,
+            "sum": 1150.384296,
+            "mean": 2.949703323076923,
+            "median": 3.8869375,
+            "p95": 5.373541,
+            "max": 9.0905
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1137.257003,
+            "mean": 4.459831384313725,
+            "median": 4.58625,
+            "p95": 5.532083,
+            "max": 9.0905
+          }
+        },
+        "postcommit": {
+          "all": {
+            "count": 389,
+            "sum": 1195.639368,
+            "mean": 3.073623053984576,
+            "median": 0.422625,
+            "p95": 14.15825,
+            "max": 189.565416
+          },
+          "nonempty": {
+            "count": 254,
+            "sum": 1148.500199,
+            "mean": 4.521654326771653,
+            "median": 0.4761665,
+            "p95": 18.991292,
+            "max": 189.565416
+          }
+        },
+        "prepare": {
+          "all": {
+            "count": 390,
+            "sum": 1130.35159,
+            "mean": 2.8983374102564103,
+            "median": 4.266166500000001,
+            "p95": 4.609542,
+            "max": 6.927792
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1126.320549,
+            "mean": 4.416943329411764,
+            "median": 4.401625,
+            "p95": 4.670833,
+            "max": 6.927792
+          }
+        },
+        "produce_log": {
+          "all": {
+            "count": 389,
+            "sum": 36.734221,
+            "mean": 0.09443244473007711,
+            "median": 0.092625,
+            "p95": 0.137167,
+            "max": 0.313042
+          },
+          "nonempty": {
+            "count": 254,
+            "sum": 24.734842,
+            "mean": 0.09738126771653544,
+            "median": 0.0943335,
+            "p95": 0.14525,
+            "max": 0.313042
+          }
+        },
+        "produce_wait": {
+          "all": {
+            "count": 390,
+            "sum": 545.803875,
+            "mean": 1.3994971153846154,
+            "median": 0.000167,
+            "p95": 4.026208,
+            "max": 18.1125
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 513.180123,
+            "mean": 2.0124710705882354,
+            "median": 2.365375,
+            "p95": 4.364125,
+            "max": 18.1125
+          }
+        },
+        "rpc_finish": {
+          "all": {
+            "count": 255,
+            "sum": 7.4083309999999996,
+            "mean": 0.02905227843137255,
+            "median": 0.027834,
+            "p95": 0.035542,
+            "max": 0.079042
+          }
+        },
+        "tick": {
+          "all": {
+            "count": 390,
+            "sum": 0.020834,
+            "mean": 5.342051282051282e-05,
+            "median": 4.2e-05,
+            "p95": 0.000125,
+            "max": 0.00025
+          }
+        },
+        "verify": {
+          "all": {
+            "count": 256,
+            "sum": 2496.9408320000002,
+            "mean": 9.753675125000001,
+            "median": 9.444312,
+            "p95": 10.203792,
+            "max": 19.443083
+          }
+        },
+        "verify_dispatch": {
+          "all": {
+            "count": 255,
+            "sum": 1.809923,
+            "mean": 0.0070977372549019604,
+            "median": 0.006916,
+            "p95": 0.01025,
+            "max": 0.015167
+          }
+        }
+      }
+    },
+    {
+      "trace": "/tmp/sfc-tps-investigation-20261022/traces-default/15654.jsonl",
+      "full_verification_batches": 256,
+      "empty_blocks": 133,
+      "phase_duration_ms": {
+        "admit": {
+          "all": {
+            "count": 255,
+            "sum": 972.115454,
+            "mean": 3.8122174666666666,
+            "median": 3.744375,
+            "p95": 4.309875,
+            "max": 6.297541
+          }
+        },
+        "admit_wait": {
+          "all": {
+            "count": 255,
+            "sum": 1274.237747,
+            "mean": 4.99701077254902,
+            "median": 0.366083,
+            "p95": 26.626916,
+            "max": 148.465417
+          }
+        },
+        "commit": {
+          "all": {
+            "count": 388,
+            "sum": 1230.27142,
+            "mean": 3.1708026288659794,
+            "median": 3.900083,
+            "p95": 5.417834,
+            "max": 44.55125
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1216.408414,
+            "mean": 4.770229074509804,
+            "median": 4.64675,
+            "p95": 5.620208,
+            "max": 44.55125
+          }
+        },
+        "postcommit": {
+          "all": {
+            "count": 387,
+            "sum": 1141.001011,
+            "mean": 2.948323025839793,
+            "median": 0.431167,
+            "p95": 12.355625,
+            "max": 151.484584
+          },
+          "nonempty": {
+            "count": 254,
+            "sum": 1021.122548,
+            "mean": 4.020167511811024,
+            "median": 0.48443749999999997,
+            "p95": 16.33625,
+            "max": 151.484584
+          }
+        },
+        "prepare": {
+          "all": {
+            "count": 388,
+            "sum": 1146.691536,
+            "mean": 2.955390556701031,
+            "median": 4.3507295,
+            "p95": 4.645667,
+            "max": 6.56125
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1142.327874,
+            "mean": 4.479717152941176,
+            "median": 4.496292,
+            "p95": 4.765667,
+            "max": 6.56125
+          }
+        },
+        "produce_log": {
+          "all": {
+            "count": 387,
+            "sum": 35.230958,
+            "mean": 0.09103606718346254,
+            "median": 0.0895,
+            "p95": 0.125625,
+            "max": 0.277083
+          },
+          "nonempty": {
+            "count": 254,
+            "sum": 24.087292,
+            "mean": 0.09483185826771653,
+            "median": 0.09281249999999999,
+            "p95": 0.130416,
+            "max": 0.277083
+          }
+        },
+        "produce_wait": {
+          "all": {
+            "count": 388,
+            "sum": 530.081411,
+            "mean": 1.3661892036082475,
+            "median": 0.000208,
+            "p95": 4.106708,
+            "max": 12.366583
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 501.268248,
+            "mean": 1.9657578352941176,
+            "median": 2.44175,
+            "p95": 4.245083,
+            "max": 12.366583
+          }
+        },
+        "rpc_finish": {
+          "all": {
+            "count": 255,
+            "sum": 7.224365,
+            "mean": 0.028330843137254903,
+            "median": 0.027792,
+            "p95": 0.033625,
+            "max": 0.044375
+          }
+        },
+        "tick": {
+          "all": {
+            "count": 388,
+            "sum": 0.020956,
+            "mean": 5.4010309278350515e-05,
+            "median": 4.2e-05,
+            "p95": 0.000125,
+            "max": 0.000292
+          }
+        },
+        "verify": {
+          "all": {
+            "count": 256,
+            "sum": 2483.348088,
+            "mean": 9.70057846875,
+            "median": 9.416645500000001,
+            "p95": 10.610667,
+            "max": 19.210917
+          }
+        },
+        "verify_dispatch": {
+          "all": {
+            "count": 255,
+            "sum": 1.818544,
+            "mean": 0.007131545098039216,
+            "median": 0.007125,
+            "p95": 0.010209,
+            "max": 0.03025
+          }
+        }
+      }
+    },
+    {
+      "trace": "/tmp/sfc-tps-investigation-20261022/traces-default/15678.jsonl",
+      "full_verification_batches": 256,
+      "empty_blocks": 96,
+      "phase_duration_ms": {
+        "admit": {
+          "all": {
+            "count": 255,
+            "sum": 964.021537,
+            "mean": 3.7804766156862746,
+            "median": 3.717834,
+            "p95": 4.13125,
+            "max": 5.258
+          }
+        },
+        "admit_wait": {
+          "all": {
+            "count": 255,
+            "sum": 1733.008876,
+            "mean": 6.796113239215686,
+            "median": 1.807375,
+            "p95": 36.271667,
+            "max": 93.108792
+          }
+        },
+        "commit": {
+          "all": {
+            "count": 351,
+            "sum": 1125.176781,
+            "mean": 3.205631854700855,
+            "median": 4.043333,
+            "p95": 5.339667,
+            "max": 5.849125
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1116.154075,
+            "mean": 4.377074803921569,
+            "median": 4.453375,
+            "p95": 5.392792,
+            "max": 5.849125
+          }
+        },
+        "postcommit": {
+          "all": {
+            "count": 351,
+            "sum": 1815.008875,
+            "mean": 5.170965455840456,
+            "median": 0.458541,
+            "p95": 23.3385,
+            "max": 89.769666
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1789.7073,
+            "mean": 7.01846,
+            "median": 0.591833,
+            "p95": 34.586792,
+            "max": 89.769666
+          }
+        },
+        "prepare": {
+          "all": {
+            "count": 351,
+            "sum": 1144.394791,
+            "mean": 3.26038401994302,
+            "median": 4.4315,
+            "p95": 4.717958,
+            "max": 5.351875
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 1142.079577,
+            "mean": 4.478743439215687,
+            "median": 4.487,
+            "p95": 4.779625,
+            "max": 5.351875
+          }
+        },
+        "produce_log": {
+          "all": {
+            "count": 351,
+            "sum": 77.82824600000001,
+            "mean": 0.2217328945868946,
+            "median": 0.090541,
+            "p95": 0.140791,
+            "max": 44.956583
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 24.588997,
+            "mean": 0.09642743921568628,
+            "median": 0.092042,
+            "p95": 0.146459,
+            "max": 0.382583
+          }
+        },
+        "produce_wait": {
+          "all": {
+            "count": 351,
+            "sum": 682.475286,
+            "mean": 1.9443740341880342,
+            "median": 1.459792,
+            "p95": 4.341416,
+            "max": 11.180209
+          },
+          "nonempty": {
+            "count": 255,
+            "sum": 648.315373,
+            "mean": 2.5424132274509805,
+            "median": 3.534958,
+            "p95": 4.341416,
+            "max": 11.180209
+          }
+        },
+        "rpc_finish": {
+          "all": {
+            "count": 255,
+            "sum": 7.406325,
+            "mean": 0.02904441176470588,
+            "median": 0.028084,
+            "p95": 0.035,
+            "max": 0.045042
+          }
+        },
+        "tick": {
+          "all": {
+            "count": 351,
+            "sum": 0.018866,
+            "mean": 5.3749287749287746e-05,
+            "median": 4.2e-05,
+            "p95": 0.000125,
+            "max": 0.000209
+          }
+        },
+        "verify": {
+          "all": {
+            "count": 256,
+            "sum": 2546.021289,
+            "mean": 9.94539566015625,
+            "median": 9.468333000000001,
+            "p95": 11.076416,
+            "max": 19.037167
+          }
+        },
+        "verify_dispatch": {
+          "all": {
+            "count": 255,
+            "sum": 1.932081,
+            "mean": 0.007576788235294118,
+            "median": 0.007375,
+            "p95": 0.011042,
+            "max": 0.023709
+          }
+        }
+      }
+    }
+  ],
+  "ablation_trials": [
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.062456,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010123252868652344,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 260.31363524050005,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.615,
+          "total_cpu_seconds": 10.615
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.538536209,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23199999999999932,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002895459,
+      "rpc_batch": 4096,
+      "seconds": 4.077773333,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632290.196057,
+      "total_cpu_percent_one_core_100": 260.31363524050005,
+      "total_cpu_seconds": 10.615,
+      "tps": 257144.25848887666,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "default",
+      "repeat": 1,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-default-1",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-default-1/15805.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 139,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 953.957668,
+                "mean": 3.741010462745098,
+                "median": 3.690167,
+                "p95": 3.983042,
+                "max": 4.76575
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 387.11196,
+                "mean": 1.5180861176470588,
+                "median": 0.352875,
+                "p95": 5.822834,
+                "max": 11.005833
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 394,
+                "sum": 1134.492836,
+                "mean": 2.8794234416243656,
+                "median": 3.7834375,
+                "p95": 5.3025,
+                "max": 7.202333
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1120.462963,
+                "mean": 4.393972403921569,
+                "median": 4.498542,
+                "p95": 5.349125,
+                "max": 7.202333
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 394,
+                "sum": 32.088865,
+                "mean": 0.08144381979695431,
+                "median": 0.08397950000000001,
+                "p95": 0.269417,
+                "max": 1.762833
+              }
+            },
+            "history_sync": {
+              "all": {
+                "count": 36,
+                "sum": 136.236832,
+                "mean": 3.7843564444444446,
+                "median": 3.846771,
+                "p95": 4.875209,
+                "max": 5.203833
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 394,
+                "sum": 273.313911,
+                "mean": 0.6936901294416243,
+                "median": 0.3720835,
+                "p95": 4.381833,
+                "max": 5.596541
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 237.580498,
+                "mean": 0.9316882274509803,
+                "median": 0.391417,
+                "p95": 4.618375,
+                "max": 5.596541
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 394,
+                "sum": 18.998203,
+                "mean": 0.04821878934010152,
+                "median": 0.063375,
+                "p95": 0.076458,
+                "max": 0.086416
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 394,
+                "sum": 292.324106,
+                "mean": 0.7419393553299493,
+                "median": 0.418646,
+                "p95": 4.458167,
+                "max": 5.664417
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 254.953153,
+                "mean": 0.9998162862745098,
+                "median": 0.462209,
+                "p95": 4.681125,
+                "max": 5.664417
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 394,
+                "sum": 1141.175661,
+                "mean": 2.896384926395939,
+                "median": 4.3124165,
+                "p95": 4.678791,
+                "max": 5.092375
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1137.218379,
+                "mean": 4.459679917647059,
+                "median": 4.462625,
+                "p95": 4.722291,
+                "max": 5.092375
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 394,
+                "sum": 35.616836,
+                "mean": 0.09039806091370559,
+                "median": 0.0899165,
+                "p95": 0.120375,
+                "max": 0.249833
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 23.943956,
+                "mean": 0.09389786666666666,
+                "median": 0.092167,
+                "p95": 0.124792,
+                "max": 0.249833
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 394,
+                "sum": 507.251623,
+                "mean": 1.2874406675126904,
+                "median": 0.000167,
+                "p95": 3.729167,
+                "max": 11.104541
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 484.140335,
+                "mean": 1.8985895490196079,
+                "median": 2.426042,
+                "p95": 3.793041,
+                "max": 11.104541
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 394,
+                "sum": 104.611992,
+                "mean": 0.2655126700507614,
+                "median": 0.2776245,
+                "p95": 0.532083,
+                "max": 0.663791
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 70.232589,
+                "mean": 0.2754219176470588,
+                "median": 0.288458,
+                "p95": 0.543459,
+                "max": 0.626791
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 7.037056,
+                "mean": 0.027596298039215685,
+                "median": 0.026917,
+                "p95": 0.032125,
+                "max": 0.040292
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 394,
+                "sum": 0.020588,
+                "mean": 5.2253807106598985e-05,
+                "median": 4.2e-05,
+                "p95": 0.000125,
+                "max": 0.000292
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2417.748794,
+                "mean": 9.4443312265625,
+                "median": 9.4505415,
+                "p95": 9.635834,
+                "max": 9.920458
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.656588,
+                "mean": 0.006496423529411765,
+                "median": 0.006417,
+                "p95": 0.01,
+                "max": 0.016375
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.081798959,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010088920593261719,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 258.39900836587464,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.579,
+          "total_cpu_seconds": 10.579
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.014626666,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23300000000000054,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002431709,
+      "rpc_batch": 4096,
+      "seconds": 4.094055959,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632306.707493,
+      "total_cpu_percent_one_core_100": 258.39900836587464,
+      "total_cpu_seconds": 10.579,
+      "tps": 256121.56025735455,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "no_history_sync",
+      "repeat": 1,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-no_history_sync-1",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-no_history_sync-1/15828.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 139,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 976.051957,
+                "mean": 3.8276547333333335,
+                "median": 3.764,
+                "p95": 4.134,
+                "max": 6.193458
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 323.216787,
+                "mean": 1.2675168117647058,
+                "median": 0.323125,
+                "p95": 5.209708,
+                "max": 24.073458
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 394,
+                "sum": 1218.0248,
+                "mean": 3.091433502538071,
+                "median": 3.941042,
+                "p95": 6.058708,
+                "max": 10.111875
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1203.573677,
+                "mean": 4.71989677254902,
+                "median": 4.624625,
+                "p95": 6.648792,
+                "max": 10.111875
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 394,
+                "sum": 59.23025,
+                "mean": 0.15033058375634517,
+                "median": 0.085563,
+                "p95": 0.271584,
+                "max": 25.747875
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 394,
+                "sum": 169.28551,
+                "mean": 0.429658654822335,
+                "median": 0.3812915,
+                "p95": 0.683625,
+                "max": 26.180625
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 131.153926,
+                "mean": 0.5143291215686274,
+                "median": 0.391666,
+                "p95": 0.716542,
+                "max": 26.180625
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 394,
+                "sum": 20.150375,
+                "mean": 0.05114308375634518,
+                "median": 0.066792,
+                "p95": 0.081167,
+                "max": 0.11525
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 394,
+                "sum": 189.442244,
+                "mean": 0.4808178781725888,
+                "median": 0.43058300000000005,
+                "p95": 0.753,
+                "max": 26.247084
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 149.520753,
+                "mean": 0.5863558941176471,
+                "median": 0.465667,
+                "p95": 0.785666,
+                "max": 26.247084
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 394,
+                "sum": 1127.297257,
+                "mean": 2.8611605507614213,
+                "median": 4.2525625,
+                "p95": 4.661125,
+                "max": 5.368583
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1122.705422,
+                "mean": 4.402766360784314,
+                "median": 4.3625,
+                "p95": 4.761417,
+                "max": 5.368583
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 394,
+                "sum": 35.935906,
+                "mean": 0.09120788324873097,
+                "median": 0.089729,
+                "p95": 0.125042,
+                "max": 0.22575
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 23.953242,
+                "mean": 0.09393428235294117,
+                "median": 0.092333,
+                "p95": 0.127833,
+                "max": 0.21225
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 394,
+                "sum": 466.212259,
+                "mean": 1.183279845177665,
+                "median": 0.000208,
+                "p95": 3.868375,
+                "max": 8.608542
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 426.437254,
+                "mean": 1.672302956862745,
+                "median": 1.268291,
+                "p95": 3.908791,
+                "max": 8.608542
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 394,
+                "sum": 109.547421,
+                "mean": 0.27803913959390864,
+                "median": 0.288479,
+                "p95": 0.5345,
+                "max": 0.65075
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 72.839673,
+                "mean": 0.28564577647058825,
+                "median": 0.2965,
+                "p95": 0.557917,
+                "max": 0.616833
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 7.531703,
+                "mean": 0.029536090196078432,
+                "median": 0.028625,
+                "p95": 0.035292,
+                "max": 0.059708
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 394,
+                "sum": 0.024083,
+                "mean": 6.11243654822335e-05,
+                "median": 4.2e-05,
+                "p95": 0.000125,
+                "max": 0.00025
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2473.803087,
+                "mean": 9.66329330859375,
+                "median": 9.470146,
+                "p95": 10.732125,
+                "max": 11.915875
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.886455,
+                "mean": 0.0073978627450980395,
+                "median": 0.007333,
+                "p95": 0.011417,
+                "max": 0.026625
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.229314,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.0065135955810546875,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 161.22060443475044,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 6.83,
+          "total_cpu_seconds": 6.83
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23400000000000176,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002508583,
+      "rpc_batch": 4096,
+      "seconds": 4.236431208,
+      "signature_verification_included": true,
+      "sqlite_indexer": false,
+      "sync_transport": "tcp",
+      "timestamp": 1792632322.797609,
+      "total_cpu_percent_one_core_100": 161.22060443475044,
+      "total_cpu_seconds": 6.83,
+      "tps": 247513.9919703849,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "no_indexer",
+      "repeat": 1,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-no_indexer-1",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-no_indexer-1/15842.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 131,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 916.700838,
+                "mean": 3.5949052470588234,
+                "median": 3.552417,
+                "p95": 3.8045,
+                "max": 4.037542
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 605.251177,
+                "mean": 2.3735340274509804,
+                "median": 0.17175,
+                "p95": 12.736375,
+                "max": 19.151375
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 386,
+                "sum": 1061.550169,
+                "mean": 2.7501299715025906,
+                "median": 3.650833,
+                "p95": 4.803667,
+                "max": 5.621209
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1050.498123,
+                "mean": 4.119600482352941,
+                "median": 4.2035,
+                "p95": 4.873333,
+                "max": 5.621209
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 385,
+                "sum": 29.571513,
+                "mean": 0.07680912467532468,
+                "median": 0.076959,
+                "p95": 0.245625,
+                "max": 1.98675
+              }
+            },
+            "history_sync": {
+              "all": {
+                "count": 36,
+                "sum": 405.496043,
+                "mean": 11.263778972222221,
+                "median": 10.5649585,
+                "p95": 15.62,
+                "max": 18.545375
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 385,
+                "sum": 537.126819,
+                "mean": 1.3951345948051947,
+                "median": 0.363042,
+                "p95": 11.041625,
+                "max": 19.559125
+              },
+              "nonempty": {
+                "count": 254,
+                "sum": 504.307234,
+                "mean": 1.9854615511811025,
+                "median": 0.379375,
+                "p95": 11.545209,
+                "max": 19.559125
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 385,
+                "sum": 17.146447,
+                "mean": 0.04453622597402598,
+                "median": 0.057458,
+                "p95": 0.071583,
+                "max": 0.08375
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 385,
+                "sum": 554.2887470000001,
+                "mean": 1.4397110311688313,
+                "median": 0.397917,
+                "p95": 11.103542,
+                "max": 19.629083
+              },
+              "nonempty": {
+                "count": 254,
+                "sum": 520.070831,
+                "mean": 2.0475229566929136,
+                "median": 0.44491650000000005,
+                "p95": 11.6,
+                "max": 19.629083
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 386,
+                "sum": 1130.695335,
+                "mean": 2.929262525906736,
+                "median": 4.308292,
+                "p95": 4.597209,
+                "max": 5.061291
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1127.472458,
+                "mean": 4.421460619607843,
+                "median": 4.429792,
+                "p95": 4.660208,
+                "max": 5.061291
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 385,
+                "sum": 24.122623,
+                "mean": 0.06265616363636364,
+                "median": 0.059584,
+                "p95": 0.076833,
+                "max": 0.202958
+              },
+              "nonempty": {
+                "count": 254,
+                "sum": 16.774122,
+                "mean": 0.06603985039370079,
+                "median": 0.061875,
+                "p95": 0.080959,
+                "max": 0.202958
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 386,
+                "sum": 377.294868,
+                "mean": 0.9774478445595854,
+                "median": 0.000125,
+                "p95": 3.603292,
+                "max": 3.983667
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 377.280911,
+                "mean": 1.4795329843137255,
+                "median": 1.227709,
+                "p95": 3.622208,
+                "max": 3.983667
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 385,
+                "sum": 101.74847,
+                "mean": 0.26428174025974027,
+                "median": 0.271834,
+                "p95": 0.533083,
+                "max": 1.927375
+              },
+              "nonempty": {
+                "count": 254,
+                "sum": 69.844546,
+                "mean": 0.2749785275590551,
+                "median": 0.284354,
+                "p95": 0.554708,
+                "max": 1.927375
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 7.040166,
+                "mean": 0.02760849411764706,
+                "median": 0.02675,
+                "p95": 0.034,
+                "max": 0.041667
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 386,
+                "sum": 0.018758,
+                "mean": 4.859585492227979e-05,
+                "median": 4.2e-05,
+                "p95": 8.4e-05,
+                "max": 0.000167
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2399.850465,
+                "mean": 9.37441587890625,
+                "median": 9.365125500000001,
+                "p95": 9.580375,
+                "max": 10.002417
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.909499,
+                "mean": 0.00748823137254902,
+                "median": 0.007708,
+                "p95": 0.010125,
+                "max": 0.01425
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.002578333,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.006440162658691406,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 168.22312218733376,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 6.753,
+          "total_cpu_seconds": 6.753
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23300000000000054,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002653791,
+      "rpc_batch": 4096,
+      "seconds": 4.014311417,
+      "signature_verification_included": true,
+      "sqlite_indexer": false,
+      "sync_transport": "tcp",
+      "timestamp": 1792632328.521936,
+      "total_cpu_percent_one_core_100": 168.22312218733376,
+      "total_cpu_seconds": 6.753,
+      "tps": 261209.4307281293,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "no_indexer",
+      "repeat": 2,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-no_indexer-2",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-no_indexer-2/15850.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 138,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 911.90504,
+                "mean": 3.5760981960784313,
+                "median": 3.54425,
+                "p95": 3.799,
+                "max": 4.037
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 396.819997,
+                "mean": 1.5561568509803922,
+                "median": 0.350208,
+                "p95": 5.532334,
+                "max": 9.719834
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 393,
+                "sum": 1056.157238,
+                "mean": 2.687422997455471,
+                "median": 3.608542,
+                "p95": 4.771333,
+                "max": 5.246667
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1044.050702,
+                "mean": 4.094316478431373,
+                "median": 4.213084,
+                "p95": 4.849625,
+                "max": 5.246667
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 393,
+                "sum": 27.694076,
+                "mean": 0.07046838676844784,
+                "median": 0.076542,
+                "p95": 0.245708,
+                "max": 0.294209
+              }
+            },
+            "history_sync": {
+              "all": {
+                "count": 36,
+                "sum": 154.653626,
+                "mean": 4.295934055555556,
+                "median": 4.307021,
+                "p95": 5.082042,
+                "max": 7.680792
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 393,
+                "sum": 283.594922,
+                "mean": 0.7216155776081425,
+                "median": 0.348584,
+                "p95": 4.803958,
+                "max": 8.148416
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 249.68017,
+                "mean": 0.9791379215686274,
+                "median": 0.369084,
+                "p95": 4.993083,
+                "max": 8.148416
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 393,
+                "sum": 17.23312,
+                "mean": 0.04385017811704835,
+                "median": 0.056167,
+                "p95": 0.071334,
+                "max": 0.081459
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 393,
+                "sum": 300.84413,
+                "mean": 0.7655066921119593,
+                "median": 0.391292,
+                "p95": 4.873667,
+                "max": 8.21225
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 265.47966,
+                "mean": 1.041096705882353,
+                "median": 0.434125,
+                "p95": 5.054583,
+                "max": 8.21225
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 393,
+                "sum": 1125.509324,
+                "mean": 2.863891409669211,
+                "median": 4.318042,
+                "p95": 4.5535,
+                "max": 4.782958
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1122.127662,
+                "mean": 4.400500635294118,
+                "median": 4.43575,
+                "p95": 4.56875,
+                "max": 4.782958
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 393,
+                "sum": 24.477406,
+                "mean": 0.06228347582697201,
+                "median": 0.059542,
+                "p95": 0.076625,
+                "max": 0.619833
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 16.813574,
+                "mean": 0.0659355843137255,
+                "median": 0.061625,
+                "p95": 0.079584,
+                "max": 0.619833
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 393,
+                "sum": 375.822625,
+                "mean": 0.9562916666666667,
+                "median": 0.000125,
+                "p95": 3.495625,
+                "max": 3.973333
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 375.808374,
+                "mean": 1.4737583294117647,
+                "median": 1.284,
+                "p95": 3.505875,
+                "max": 3.973333
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 393,
+                "sum": 100.953407,
+                "mean": 0.25687889821882953,
+                "median": 0.263208,
+                "p95": 0.53425,
+                "max": 0.604958
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 67.959703,
+                "mean": 0.2665086392156863,
+                "median": 0.269041,
+                "p95": 0.548917,
+                "max": 0.604958
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 6.929069,
+                "mean": 0.027172819607843138,
+                "median": 0.026958,
+                "p95": 0.032959,
+                "max": 0.039334
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 393,
+                "sum": 0.019367,
+                "mean": 4.9279898218829515e-05,
+                "median": 4.2e-05,
+                "p95": 8.4e-05,
+                "max": 0.000583
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2390.054664,
+                "mean": 9.33615103125,
+                "median": 9.326875,
+                "p95": 9.501958,
+                "max": 9.970167
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.766377,
+                "mean": 0.00692696862745098,
+                "median": 0.006916,
+                "p95": 0.009459,
+                "max": 0.012833
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 3.963812583,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010092735290527344,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 266.27043820636266,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.583,
+          "total_cpu_seconds": 10.583
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.310349542,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23400000000000176,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002343,
+      "rpc_batch": 4096,
+      "seconds": 3.974530583,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632334.209031,
+      "total_cpu_percent_one_core_100": 266.27043820636266,
+      "total_cpu_seconds": 10.583,
+      "tps": 263823.85997607006,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "no_history_sync",
+      "repeat": 2,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-no_history_sync-2",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-no_history_sync-2/15861.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 121,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 980.18246,
+                "mean": 3.8438527843137256,
+                "median": 3.792833,
+                "p95": 4.255542,
+                "max": 5.409709
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 253.448176,
+                "mean": 0.9939144156862745,
+                "median": 0.183292,
+                "p95": 4.895417,
+                "max": 8.508417
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 376,
+                "sum": 1179.0876269999999,
+                "mean": 3.1358713484042555,
+                "median": 3.960979,
+                "p95": 5.816833,
+                "max": 7.643333
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1166.881295,
+                "mean": 4.576005078431373,
+                "median": 4.646292,
+                "p95": 6.036583,
+                "max": 7.643333
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 376,
+                "sum": 31.327363,
+                "mean": 0.08331745478723404,
+                "median": 0.0859375,
+                "p95": 0.268625,
+                "max": 0.3055
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 376,
+                "sum": 136.068914,
+                "mean": 0.3618854095744681,
+                "median": 0.388333,
+                "p95": 0.655459,
+                "max": 0.875417
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 103.932916,
+                "mean": 0.40758006274509806,
+                "median": 0.408209,
+                "p95": 0.668709,
+                "max": 0.875417
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 376,
+                "sum": 19.808965,
+                "mean": 0.05268341755319149,
+                "median": 0.066687,
+                "p95": 0.083125,
+                "max": 0.16125
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 376,
+                "sum": 155.886498,
+                "mean": 0.41459175,
+                "median": 0.430375,
+                "p95": 0.728958,
+                "max": 0.952709
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 122.246003,
+                "mean": 0.47939609019607843,
+                "median": 0.48125,
+                "p95": 0.750792,
+                "max": 0.952709
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 376,
+                "sum": 1137.209042,
+                "mean": 3.0244921329787235,
+                "median": 4.292354,
+                "p95": 4.73525,
+                "max": 6.655708
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1133.559034,
+                "mean": 4.445329545098039,
+                "median": 4.402833,
+                "p95": 4.797,
+                "max": 6.655708
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 376,
+                "sum": 35.037501,
+                "mean": 0.09318484308510638,
+                "median": 0.0905835,
+                "p95": 0.127375,
+                "max": 0.284542
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 24.421335,
+                "mean": 0.09576994117647059,
+                "median": 0.09325,
+                "p95": 0.134834,
+                "max": 0.284542
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 376,
+                "sum": 520.524713,
+                "mean": 1.3843742367021277,
+                "median": 0.000167,
+                "p95": 4.035042,
+                "max": 10.019292
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 483.046836,
+                "mean": 1.894301317647059,
+                "median": 1.532583,
+                "p95": 4.035042,
+                "max": 10.019292
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 376,
+                "sum": 104.207004,
+                "mean": 0.27714628723404255,
+                "median": 0.28925,
+                "p95": 0.535541,
+                "max": 0.742417
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 73.356966,
+                "mean": 0.28767437647058824,
+                "median": 0.305542,
+                "p95": 0.556875,
+                "max": 0.742417
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 7.371918,
+                "mean": 0.028909482352941177,
+                "median": 0.028208,
+                "p95": 0.034416,
+                "max": 0.055958
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 376,
+                "sum": 0.022163,
+                "mean": 5.894414893617021e-05,
+                "median": 4.2e-05,
+                "p95": 0.000125,
+                "max": 0.00025
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2422.719421,
+                "mean": 9.46374773828125,
+                "median": 9.466813,
+                "p95": 9.750667,
+                "max": 10.068042
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.952248,
+                "mean": 0.007655874509803921,
+                "median": 0.007542,
+                "p95": 0.011125,
+                "max": 0.032417
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.079142959,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010024070739746095,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 256.9962335142048,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.511000000000001,
+          "total_cpu_seconds": 10.511000000000001
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.529629917,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23100000000000165,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002576917,
+      "rpc_batch": 4096,
+      "seconds": 4.089943209,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632350.451123,
+      "total_cpu_percent_one_core_100": 256.9962335142048,
+      "total_cpu_seconds": 10.511000000000001,
+      "tps": 256379.11003081605,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "default",
+      "repeat": 2,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-default-2",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-default-2/15882.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 132,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 958.098289,
+                "mean": 3.7572481921568626,
+                "median": 3.743333,
+                "p95": 4.02025,
+                "max": 4.645459
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 406.968542,
+                "mean": 1.5959550666666666,
+                "median": 0.407125,
+                "p95": 5.724542,
+                "max": 10.942667
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 387,
+                "sum": 1111.21213,
+                "mean": 2.871349173126615,
+                "median": 3.692,
+                "p95": 5.196208,
+                "max": 6.920584
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1098.458465,
+                "mean": 4.30768025490196,
+                "median": 4.402917,
+                "p95": 5.256542,
+                "max": 6.920584
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 387,
+                "sum": 30.018461,
+                "mean": 0.0775670826873385,
+                "median": 0.083334,
+                "p95": 0.263333,
+                "max": 0.3315
+              }
+            },
+            "history_sync": {
+              "all": {
+                "count": 36,
+                "sum": 142.772333,
+                "mean": 3.965898138888889,
+                "median": 4.0036249999999995,
+                "p95": 4.936,
+                "max": 6.2735
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 387,
+                "sum": 276.749491,
+                "mean": 0.7151149638242894,
+                "median": 0.377584,
+                "p95": 4.357416,
+                "max": 6.670583
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 238.240699,
+                "mean": 0.9342772509803922,
+                "median": 0.399333,
+                "p95": 4.737125,
+                "max": 6.670583
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 387,
+                "sum": 19.082405,
+                "mean": 0.04930854005167959,
+                "median": 0.064083,
+                "p95": 0.077583,
+                "max": 0.155042
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 387,
+                "sum": 295.857374,
+                "mean": 0.764489338501292,
+                "median": 0.420625,
+                "p95": 4.381792,
+                "max": 6.739708
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 255.790579,
+                "mean": 1.0031003098039215,
+                "median": 0.469958,
+                "p95": 4.811167,
+                "max": 6.739708
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 387,
+                "sum": 1140.068673,
+                "mean": 2.94591388372093,
+                "median": 4.311708,
+                "p95": 4.7315,
+                "max": 5.286209
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1136.352629,
+                "mean": 4.456284819607843,
+                "median": 4.436917,
+                "p95": 4.785667,
+                "max": 5.286209
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 387,
+                "sum": 34.613916,
+                "mean": 0.08944164341085271,
+                "median": 0.089417,
+                "p95": 0.12175,
+                "max": 0.203875
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 23.832207,
+                "mean": 0.09345963529411765,
+                "median": 0.091917,
+                "p95": 0.124792,
+                "max": 0.203875
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 387,
+                "sum": 496.334657,
+                "mean": 1.2825184935400518,
+                "median": 0.000167,
+                "p95": 3.852916,
+                "max": 11.009667
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 477.018952,
+                "mean": 1.870662556862745,
+                "median": 1.527584,
+                "p95": 3.973833,
+                "max": 11.009667
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 387,
+                "sum": 103.588335,
+                "mean": 0.2676701162790698,
+                "median": 0.282334,
+                "p95": 0.535417,
+                "max": 0.588459
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 70.238753,
+                "mean": 0.2754460901960784,
+                "median": 0.29,
+                "p95": 0.556875,
+                "max": 0.588459
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 7.087323,
+                "mean": 0.027793423529411766,
+                "median": 0.027166,
+                "p95": 0.032375,
+                "max": 0.041417
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 387,
+                "sum": 0.020537,
+                "mean": 5.30671834625323e-05,
+                "median": 4.2e-05,
+                "p95": 0.000125,
+                "max": 0.000208
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2410.128464,
+                "mean": 9.4145643125,
+                "median": 9.4097495,
+                "p95": 9.580375,
+                "max": 10.0435
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.720877,
+                "mean": 0.00674853725490196,
+                "median": 0.006666,
+                "p95": 0.010292,
+                "max": 0.025708
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.9929685,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010502815246582031,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 219.5261132271759,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 11.013,
+          "total_cpu_seconds": 11.013
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.505216167,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23300000000000054,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002468375,
+      "rpc_batch": 4096,
+      "seconds": 5.01671525,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632367.793838,
+      "total_cpu_percent_one_core_100": 219.5261132271759,
+      "total_cpu_seconds": 11.013,
+      "tps": 209016.44756496794,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "default",
+      "repeat": 3,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-default-3",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-default-3/15906.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 145,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 968.624173,
+                "mean": 3.798526168627451,
+                "median": 3.758292,
+                "p95": 4.296042,
+                "max": 5.676208
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 1237.136218,
+                "mean": 4.851514580392157,
+                "median": 0.309667,
+                "p95": 20.47625,
+                "max": 113.260542
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 400,
+                "sum": 1126.392587,
+                "mean": 2.8159814675,
+                "median": 3.707125,
+                "p95": 5.217709,
+                "max": 12.416542
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1112.476618,
+                "mean": 4.362653403921569,
+                "median": 4.452917,
+                "p95": 5.27175,
+                "max": 12.416542
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 400,
+                "sum": 28.688075,
+                "mean": 0.0717201875,
+                "median": 0.08135400000000001,
+                "p95": 0.245541,
+                "max": 0.343708
+              }
+            },
+            "history_sync": {
+              "all": {
+                "count": 37,
+                "sum": 976.703046,
+                "mean": 26.39737962162162,
+                "median": 11.295458,
+                "p95": 66.676,
+                "max": 114.235417
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 400,
+                "sum": 1113.540449,
+                "mean": 2.7838511225,
+                "median": 0.368438,
+                "p95": 11.568583,
+                "max": 114.970375
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1066.022045,
+                "mean": 4.1804786078431375,
+                "median": 0.391458,
+                "p95": 18.151959,
+                "max": 114.970375
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 400,
+                "sum": 19.143082,
+                "mean": 0.047857705,
+                "median": 0.063438,
+                "p95": 0.0765,
+                "max": 0.112291
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 400,
+                "sum": 1132.696207,
+                "mean": 2.8317405175,
+                "median": 0.41683349999999997,
+                "p95": 11.634542,
+                "max": 115.03525
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1083.448499,
+                "mean": 4.248817643137255,
+                "median": 0.460166,
+                "p95": 18.220667,
+                "max": 115.03525
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 400,
+                "sum": 1128.67317,
+                "mean": 2.821682925,
+                "median": 4.2563125,
+                "p95": 4.619542,
+                "max": 5.898625
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1124.722752,
+                "mean": 4.410677458823529,
+                "median": 4.411084,
+                "p95": 4.699417,
+                "max": 5.898625
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 400,
+                "sum": 36.458671,
+                "mean": 0.0911466775,
+                "median": 0.089583,
+                "p95": 0.125041,
+                "max": 0.322375
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 24.28358,
+                "mean": 0.09522972549019608,
+                "median": 0.091917,
+                "p95": 0.128417,
+                "max": 0.322375
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 400,
+                "sum": 504.889007,
+                "mean": 1.2622225175,
+                "median": 0.000167,
+                "p95": 3.952375,
+                "max": 10.879709
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 463.741797,
+                "mean": 1.8185952823529412,
+                "median": 1.449958,
+                "p95": 4.008416,
+                "max": 10.879709
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 400,
+                "sum": 107.743045,
+                "mean": 0.2693576125,
+                "median": 0.2803745,
+                "p95": 0.552125,
+                "max": 0.692
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 71.132042,
+                "mean": 0.2789491843137255,
+                "median": 0.287375,
+                "p95": 0.55825,
+                "max": 0.692
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 7.163666,
+                "mean": 0.028092807843137255,
+                "median": 0.027,
+                "p95": 0.03375,
+                "max": 0.058083
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 400,
+                "sum": 0.019507,
+                "mean": 4.87675e-05,
+                "median": 4.2e-05,
+                "p95": 8.4e-05,
+                "max": 0.000209
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2481.637751,
+                "mean": 9.69389746484375,
+                "median": 9.429167,
+                "p95": 9.676083,
+                "max": 19.117708
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.743924,
+                "mean": 0.006838917647058824,
+                "median": 0.00675,
+                "p95": 0.010334,
+                "max": 0.014292
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 3.993035,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.010034561157226562,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 262.81252148862967,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 10.522,
+          "total_cpu_seconds": 10.522
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "index_catchup_seconds": 10.288409667,
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.23199999999999932,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002451583,
+      "rpc_batch": 4096,
+      "seconds": 4.003614417,
+      "signature_verification_included": true,
+      "sqlite_indexer": true,
+      "sync_transport": "tcp",
+      "timestamp": 1792632384.16189,
+      "total_cpu_percent_one_core_100": 262.81252148862967,
+      "total_cpu_seconds": 10.522,
+      "tps": 261907.33941499845,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "no_history_sync",
+      "repeat": 3,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-no_history_sync-3",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-no_history_sync-3/15931.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 117,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 972.771583,
+                "mean": 3.8147905215686273,
+                "median": 3.790208,
+                "p95": 4.096708,
+                "max": 4.719958
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 315.356833,
+                "mean": 1.236693462745098,
+                "median": 0.295167,
+                "p95": 4.847167,
+                "max": 33.568667
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 372,
+                "sum": 1243.853959,
+                "mean": 3.343693438172043,
+                "median": 4.2138545,
+                "p95": 5.949459,
+                "max": 29.343125
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1202.166299,
+                "mean": 4.714377643137255,
+                "median": 4.769208,
+                "p95": 6.0375,
+                "max": 11.25
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 372,
+                "sum": 32.944083,
+                "mean": 0.0885593629032258,
+                "median": 0.08922949999999999,
+                "p95": 0.276416,
+                "max": 0.395166
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 372,
+                "sum": 136.089623,
+                "mean": 0.3658323198924731,
+                "median": 0.387229,
+                "p95": 0.654834,
+                "max": 0.865958
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 105.545869,
+                "mean": 0.413905368627451,
+                "median": 0.412,
+                "p95": 0.691083,
+                "max": 0.865958
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 372,
+                "sum": 20.133675,
+                "mean": 0.054122782258064515,
+                "median": 0.069,
+                "p95": 0.081041,
+                "max": 0.128875
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 372,
+                "sum": 156.238473,
+                "mean": 0.4199958951612903,
+                "median": 0.436271,
+                "p95": 0.733875,
+                "max": 0.940792
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 124.196717,
+                "mean": 0.48704594901960785,
+                "median": 0.491292,
+                "p95": 0.758583,
+                "max": 0.940792
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 372,
+                "sum": 1126.590918,
+                "mean": 3.0284702096774194,
+                "median": 4.2937294999999995,
+                "p95": 4.609542,
+                "max": 5.075875
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1123.040917,
+                "mean": 4.40408202745098,
+                "median": 4.389875,
+                "p95": 4.645,
+                "max": 5.075875
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 372,
+                "sum": 34.794126,
+                "mean": 0.09353259677419355,
+                "median": 0.091229,
+                "p95": 0.11675,
+                "max": 1.028166
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 24.018675,
+                "mean": 0.09419088235294118,
+                "median": 0.09425,
+                "p95": 0.118833,
+                "max": 0.373833
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 372,
+                "sum": 553.734996,
+                "mean": 1.488534935483871,
+                "median": 0.00025,
+                "p95": 3.957708,
+                "max": 10.4005
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 524.602798,
+                "mean": 2.057265874509804,
+                "median": 2.542791,
+                "p95": 3.991709,
+                "max": 10.4005
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 372,
+                "sum": 102.632755,
+                "mean": 0.27589450268817206,
+                "median": 0.2931045,
+                "p95": 0.531833,
+                "max": 0.640792
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 73.266757,
+                "mean": 0.2873206156862745,
+                "median": 0.301667,
+                "p95": 0.560917,
+                "max": 0.640792
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 7.586955,
+                "mean": 0.029752764705882354,
+                "median": 0.029334,
+                "p95": 0.034875,
+                "max": 0.04675
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 372,
+                "sum": 0.023836,
+                "mean": 6.40752688172043e-05,
+                "median": 4.2e-05,
+                "p95": 0.000125,
+                "max": 0.000542
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2402.155458,
+                "mean": 9.3834197578125,
+                "median": 9.3891455,
+                "p95": 9.800458,
+                "max": 14.006333
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.890164,
+                "mean": 0.007412407843137255,
+                "median": 0.007542,
+                "p95": 0.009792,
+                "max": 0.016542
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "admission_attempts": 1048576,
+      "admission_seconds": 4.373862375,
+      "backend": "gpu",
+      "benchmark": "binary_admission_durable_commit",
+      "benchmark_driver": "rust",
+      "binary_hash": "64eecbe1807eae2be76dab47561333f52e174b6ae380bbca80170886f366ce2d",
+      "block_interval_ms": 10,
+      "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+      "cpu_ms_per_committed_transaction": 0.006565093994140625,
+      "cpu_usage": [
+        {
+          "cpu_percent_one_core_100": 157.00820305276628,
+          "cpu_records": 0,
+          "gpu_host_cpu_seconds": 0.0,
+          "gpu_records": 1048576,
+          "role": "sequencer",
+          "rust_cpu_seconds": 6.884,
+          "total_cpu_seconds": 6.884
+        }
+      ],
+      "follower_replay_included": false,
+      "gpu_runtime": "mlx-native",
+      "inflight": 1,
+      "load_generator_cpu_seconds": 0.22500000000000142,
+      "network_included": true,
+      "nodes": 1,
+      "python_processes": 0,
+      "rayon_threads": 12,
+      "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+      "request_preparation_seconds": 0.002683209,
+      "rpc_batch": 4096,
+      "seconds": 4.384484292,
+      "signature_verification_included": true,
+      "sqlite_indexer": false,
+      "sync_transport": "tcp",
+      "timestamp": 1792632400.775845,
+      "total_cpu_percent_one_core_100": 157.00820305276628,
+      "total_cpu_seconds": 6.884,
+      "tps": 239156.06264418567,
+      "transactions": 1048576,
+      "transport": "tcp",
+      "trial": 1,
+      "case": "no_indexer",
+      "repeat": 3,
+      "traces": "/tmp/sfc-tps-investigation-20261022/traces-no_indexer-3",
+      "trace_summary": [
+        {
+          "trace": "/tmp/sfc-tps-investigation-20261022/traces-no_indexer-3/15958.jsonl",
+          "full_verification_batches": 256,
+          "empty_blocks": 124,
+          "phase_duration_ms": {
+            "admit": {
+              "all": {
+                "count": 255,
+                "sum": 943.739089,
+                "mean": 3.7009376039215685,
+                "median": 3.654042,
+                "p95": 3.962542,
+                "max": 5.065625
+              }
+            },
+            "admit_wait": {
+              "all": {
+                "count": 255,
+                "sum": 739.577919,
+                "mean": 2.9003055647058824,
+                "median": 0.388709,
+                "p95": 13.006625,
+                "max": 63.530834
+              }
+            },
+            "commit": {
+              "all": {
+                "count": 379,
+                "sum": 1176.358641,
+                "mean": 3.1038486569920845,
+                "median": 3.9885,
+                "p95": 5.608833,
+                "max": 6.846917
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1163.794552,
+                "mean": 4.563900203921569,
+                "median": 4.626375,
+                "p95": 5.851708,
+                "max": 6.846917
+              }
+            },
+            "history_append": {
+              "all": {
+                "count": 379,
+                "sum": 30.355253,
+                "mean": 0.08009301583113457,
+                "median": 0.084167,
+                "p95": 0.268042,
+                "max": 0.529875
+              }
+            },
+            "history_sync": {
+              "all": {
+                "count": 36,
+                "sum": 490.657209,
+                "mean": 13.629366916666667,
+                "median": 11.561854,
+                "p95": 18.043125,
+                "max": 60.189458
+              }
+            },
+            "maintain": {
+              "all": {
+                "count": 379,
+                "sum": 626.573202,
+                "mean": 1.6532274459102902,
+                "median": 0.377209,
+                "p95": 11.8825,
+                "max": 60.988083
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 594.361082,
+                "mean": 2.3308277725490196,
+                "median": 0.40875,
+                "p95": 12.484458,
+                "max": 60.988083
+              }
+            },
+            "pending_reset": {
+              "all": {
+                "count": 379,
+                "sum": 19.963914,
+                "mean": 0.052675234828496044,
+                "median": 0.066792,
+                "p95": 0.085292,
+                "max": 0.153416
+              }
+            },
+            "postcommit": {
+              "all": {
+                "count": 379,
+                "sum": 646.553838,
+                "mean": 1.705946802110818,
+                "median": 0.424708,
+                "p95": 11.952667,
+                "max": 61.066292
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 612.826006,
+                "mean": 2.403239239215686,
+                "median": 0.479708,
+                "p95": 12.548917,
+                "max": 61.066292
+              }
+            },
+            "prepare": {
+              "all": {
+                "count": 379,
+                "sum": 1153.681996,
+                "mean": 3.044015820580475,
+                "median": 4.419416,
+                "p95": 4.6965,
+                "max": 5.981375
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 1149.626078,
+                "mean": 4.508337560784314,
+                "median": 4.496125,
+                "p95": 4.781292,
+                "max": 5.981375
+              }
+            },
+            "produce_log": {
+              "all": {
+                "count": 379,
+                "sum": 25.956218,
+                "mean": 0.06848606332453826,
+                "median": 0.065416,
+                "p95": 0.094667,
+                "max": 0.187208
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 18.516301,
+                "mean": 0.07261294509803921,
+                "median": 0.067708,
+                "p95": 0.099042,
+                "max": 0.187208
+              }
+            },
+            "produce_wait": {
+              "all": {
+                "count": 379,
+                "sum": 475.883163,
+                "mean": 1.2556283984168866,
+                "median": 0.000291,
+                "p95": 3.703625,
+                "max": 4.972208
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 475.865624,
+                "mean": 1.8661397019607844,
+                "median": 2.42425,
+                "p95": 3.743084,
+                "max": 4.972208
+              }
+            },
+            "prune": {
+              "all": {
+                "count": 379,
+                "sum": 105.091912,
+                "mean": 0.2772873667546174,
+                "median": 0.281834,
+                "p95": 0.541375,
+                "max": 0.616833
+              },
+              "nonempty": {
+                "count": 255,
+                "sum": 73.875163,
+                "mean": 0.2897065215686275,
+                "median": 0.300291,
+                "p95": 0.559208,
+                "max": 0.616833
+              }
+            },
+            "rpc_finish": {
+              "all": {
+                "count": 255,
+                "sum": 7.784457,
+                "mean": 0.030527282352941176,
+                "median": 0.029625,
+                "p95": 0.036625,
+                "max": 0.089375
+              }
+            },
+            "tick": {
+              "all": {
+                "count": 379,
+                "sum": 0.023577999999999998,
+                "mean": 6.221108179419526e-05,
+                "median": 4.2e-05,
+                "p95": 0.000125,
+                "max": 0.000209
+              }
+            },
+            "verify": {
+              "all": {
+                "count": 256,
+                "sum": 2393.915959,
+                "mean": 9.35123421484375,
+                "median": 9.319812500000001,
+                "p95": 9.860792,
+                "max": 11.00925
+              }
+            },
+            "verify_dispatch": {
+              "all": {
+                "count": 255,
+                "sum": 1.973172,
+                "mean": 0.007737929411764706,
+                "median": 0.0075,
+                "p95": 0.0105,
+                "max": 0.014584
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "rejected_background_sync": {
+    "description": "One background fsync at a time; append and RocksDB commit remain on the producer. Slow mode persisted, with latency moving into RocksDB commits. Prototype discarded.",
+    "trials": [
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 4.114369291,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "94664ef5c00759d20a6949e20f0c2b0d01db3b560fb994c089c5099e00368302",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.010724067687988281,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 272.6845993235158,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 11.245,
+            "total_cpu_seconds": 11.245
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.1612665,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.23499999999999943,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.00262925,
+        "rpc_batch": 4096,
+        "seconds": 4.123811916,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632622.009824,
+        "total_cpu_percent_one_core_100": 272.6845993235158,
+        "total_cpu_seconds": 11.245,
+        "tps": 254273.47836394387,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "original",
+        "repeat": 1
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 4.0695195,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "e494c8d30d23d3ed27f06da280c6202a21875ec128333344e1e9e43860247f1e",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.010118484497070312,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 260.2500436305151,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.61,
+            "total_cpu_seconds": 10.61
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.487033125,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.2339999999999982,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002746875,
+        "rpc_batch": 4096,
+        "seconds": 4.0768485,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632638.631627,
+        "total_cpu_percent_one_core_100": 260.2500436305151,
+        "total_cpu_seconds": 10.61,
+        "tps": 257202.59165872858,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "capnp",
+        "repeat": 1
+      },
+      {
+        "admission_attempts": 1056768,
+        "admission_seconds": 4.987334875,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "f99cc252f9baa488915fd2e2e6640588bd57ac5266d66ff13fdcf796e5474f0a",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.011075973510742188,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 229.38793617455397,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1056768,
+            "role": "sequencer",
+            "rust_cpu_seconds": 11.614,
+            "total_cpu_seconds": 11.614
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.541514375,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.23000000000000043,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002698208,
+        "rpc_batch": 4096,
+        "seconds": 5.063038708,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632656.385428,
+        "total_cpu_percent_one_core_100": 229.38793617455397,
+        "total_cpu_seconds": 11.614,
+        "tps": 207104.08520937583,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "async",
+        "repeat": 1
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 5.208373458,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "f99cc252f9baa488915fd2e2e6640588bd57ac5266d66ff13fdcf796e5474f0a",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.010559082031250002,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 211.83013360488698,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 11.072000000000001,
+            "total_cpu_seconds": 11.072000000000001
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.843016166,
+        "inflight": 2,
+        "load_generator_cpu_seconds": 0.2259999999999991,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.00251775,
+        "rpc_batch": 4096,
+        "seconds": 5.226829541,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632673.965998,
+        "total_cpu_percent_one_core_100": 211.83013360488698,
+        "total_cpu_seconds": 11.072000000000001,
+        "tps": 200614.15658858197,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "async_inflight2",
+        "repeat": 1
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 4.401291375,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "f99cc252f9baa488915fd2e2e6640588bd57ac5266d66ff13fdcf796e5474f0a",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.01040935516357422,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 247.59366950718322,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.915000000000001,
+            "total_cpu_seconds": 10.915000000000001
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 9.752116416,
+        "inflight": 2,
+        "load_generator_cpu_seconds": 0.2289999999999992,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002428083,
+        "rpc_batch": 4096,
+        "seconds": 4.408432583,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632691.226828,
+        "total_cpu_percent_one_core_100": 247.59366950718322,
+        "total_cpu_seconds": 10.915000000000001,
+        "tps": 237856.87548984349,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "async_inflight2",
+        "repeat": 2
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 4.233677292,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "f99cc252f9baa488915fd2e2e6640588bd57ac5266d66ff13fdcf796e5474f0a",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.010004997253417969,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 247.15993177699835,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.491,
+            "total_cpu_seconds": 10.491
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.352074834,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.2270000000000003,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002444292,
+        "rpc_batch": 4096,
+        "seconds": 4.244620042,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632707.098187,
+        "total_cpu_percent_one_core_100": 247.15993177699835,
+        "total_cpu_seconds": 10.491,
+        "tps": 247036.481386901,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "async",
+        "repeat": 2
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 5.093865083,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "e494c8d30d23d3ed27f06da280c6202a21875ec128333344e1e9e43860247f1e",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.010409355163574219,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 213.80669377135098,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.915,
+            "total_cpu_seconds": 10.915
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.368965291,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.2410000000000032,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002343292,
+        "rpc_batch": 4096,
+        "seconds": 5.105078708,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632724.406806,
+        "total_cpu_percent_one_core_100": 213.80669377135098,
+        "total_cpu_seconds": 10.915,
+        "tps": 205398.59617772617,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "capnp",
+        "repeat": 2
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 5.084961083,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "94664ef5c00759d20a6949e20f0c2b0d01db3b560fb994c089c5099e00368302",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.011082649230957031,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 228.11963876399145,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 11.621,
+            "total_cpu_seconds": 11.621
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.19168925,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.23300000000000054,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002407875,
+        "rpc_batch": 4096,
+        "seconds": 5.094256708,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632741.802466,
+        "total_cpu_percent_one_core_100": 228.11963876399145,
+        "total_cpu_seconds": 11.621,
+        "tps": 205834.935321049,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "original",
+        "repeat": 2
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 4.8974195,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "94664ef5c00759d20a6949e20f0c2b0d01db3b560fb994c089c5099e00368302",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.010967254638671875,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 234.3716862200023,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 11.5,
+            "total_cpu_seconds": 11.5
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 9.9350945,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.22800000000000153,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002384292,
+        "rpc_batch": 4096,
+        "seconds": 4.906736042,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632758.977269,
+        "total_cpu_percent_one_core_100": 234.3716862200023,
+        "total_cpu_seconds": 11.5,
+        "tps": 213701.32630419574,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "original",
+        "repeat": 3
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 4.085798458,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "e494c8d30d23d3ed27f06da280c6202a21875ec128333344e1e9e43860247f1e",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.009965896606445312,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 254.9358290534507,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.45,
+            "total_cpu_seconds": 10.45
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 9.855250834,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.22500000000000142,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002318,
+        "rpc_batch": 4096,
+        "seconds": 4.09907075,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632775.066422,
+        "total_cpu_percent_one_core_100": 254.9358290534507,
+        "total_cpu_seconds": 10.45,
+        "tps": 255808.22190004893,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "capnp",
+        "repeat": 3
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 3.940727333,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "f99cc252f9baa488915fd2e2e6640588bd57ac5266d66ff13fdcf796e5474f0a",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.009917259216308594,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 263.3871280938038,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.399,
+            "total_cpu_seconds": 10.399
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.385452792,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.23600000000000065,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002434334,
+        "rpc_batch": 4096,
+        "seconds": 3.948180792,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632790.667628,
+        "total_cpu_percent_one_core_100": 263.3871280938038,
+        "total_cpu_seconds": 10.399,
+        "tps": 265584.59585353255,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "async",
+        "repeat": 3
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 5.442558042,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "f99cc252f9baa488915fd2e2e6640588bd57ac5266d66ff13fdcf796e5474f0a",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.010896682739257812,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 209.6715001095948,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 11.426,
+            "total_cpu_seconds": 11.426
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.1890405,
+        "inflight": 2,
+        "load_generator_cpu_seconds": 0.22299999999999898,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002438375,
+        "rpc_batch": 4096,
+        "seconds": 5.449476917,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632808.301915,
+        "total_cpu_percent_one_core_100": 209.6715001095948,
+        "total_cpu_seconds": 11.426,
+        "tps": 192417.7340267097,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1,
+        "case": "async_inflight2",
+        "repeat": 3
+      }
+    ],
+    "traced_trials": [
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 3.937935708,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "8d4d5cce5aa04028776669ba8ac3f1367ee569fbb187a013c3d1a1f4d9d4defa",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.009904861450195312,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 263.23585922113097,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.386,
+            "total_cpu_seconds": 10.386
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 9.874320458,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.22500000000000142,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.003024791,
+        "rpc_batch": 4096,
+        "seconds": 3.945511083,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632905.382651,
+        "total_cpu_percent_one_core_100": 263.23585922113097,
+        "total_cpu_seconds": 10.386,
+        "tps": 265764.3022517395,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 3.9497433749999997,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "8d4d5cce5aa04028776669ba8ac3f1367ee569fbb187a013c3d1a1f4d9d4defa",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.009924888610839844,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 262.98886029046275,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.407,
+            "total_cpu_seconds": 10.407
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.092773292,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.22900000000000276,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.0018915,
+        "rpc_batch": 4096,
+        "seconds": 3.957201833,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632919.535126,
+        "total_cpu_percent_one_core_100": 262.98886029046275,
+        "total_cpu_seconds": 10.407,
+        "tps": 264979.1555375538,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 2
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 5.104937666,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "binary_hash": "8d4d5cce5aa04028776669ba8ac3f1367ee569fbb187a013c3d1a1f4d9d4defa",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.011073112487792969,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 226.95522323074653,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 11.611,
+            "total_cpu_seconds": 11.611
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "index_catchup_seconds": 10.218278417,
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.2170000000000023,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002276583,
+        "rpc_batch": 4096,
+        "seconds": 5.115987125,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792632935.056286,
+        "total_cpu_percent_one_core_100": 226.95522323074653,
+        "total_cpu_seconds": 11.611,
+        "tps": 204960.64090466217,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 3
+      }
+    ],
+    "trace_summaries": [
+      {
+        "trace": "/tmp/sfc-tps-investigation-20261022/traces-async/16850.jsonl",
+        "full_verification_batches": 256,
+        "empty_blocks": 133,
+        "phase_duration_ms": {
+          "admit": {
+            "all": {
+              "count": 255,
+              "sum": 974.899292,
+              "mean": 3.8231344784313728,
+              "median": 3.795125,
+              "p95": 4.086375,
+              "max": 4.8565
+            }
+          },
+          "admit_wait": {
+            "all": {
+              "count": 255,
+              "sum": 248.859671,
+              "mean": 0.9759202784313725,
+              "median": 0.103792,
+              "p95": 5.125666,
+              "max": 7.950666
+            }
+          },
+          "background_sync": {
+            "all": {
+              "count": 36,
+              "sum": 138.980167,
+              "mean": 3.8605601944444445,
+              "median": 3.9581665,
+              "p95": 4.745875,
+              "max": 5.563542
+            }
+          },
+          "commit": {
+            "all": {
+              "count": 388,
+              "sum": 1118.747577,
+              "mean": 2.883370043814433,
+              "median": 3.735958,
+              "p95": 5.162875,
+              "max": 5.975625
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 1103.261832,
+              "mean": 4.326516988235294,
+              "median": 4.443583,
+              "p95": 5.252375,
+              "max": 5.975625
+            }
+          },
+          "history_append": {
+            "all": {
+              "count": 387,
+              "sum": 29.807331,
+              "mean": 0.07702152713178295,
+              "median": 0.082417,
+              "p95": 0.261375,
+              "max": 0.334958
+            }
+          },
+          "maintain": {
+            "all": {
+              "count": 387,
+              "sum": 132.374424,
+              "mean": 0.34205277519379845,
+              "median": 0.37125,
+              "p95": 0.64725,
+              "max": 0.8585
+            },
+            "nonempty": {
+              "count": 254,
+              "sum": 98.445918,
+              "mean": 0.38758235433070864,
+              "median": 0.384521,
+              "p95": 0.660292,
+              "max": 0.8585
+            }
+          },
+          "pending_reset": {
+            "all": {
+              "count": 387,
+              "sum": 18.941118,
+              "mean": 0.04894345736434109,
+              "median": 0.065291,
+              "p95": 0.075625,
+              "max": 0.091208
+            }
+          },
+          "postcommit": {
+            "all": {
+              "count": 387,
+              "sum": 151.322835,
+              "mean": 0.39101507751937986,
+              "median": 0.410958,
+              "p95": 0.715458,
+              "max": 0.93175
+            },
+            "nonempty": {
+              "count": 254,
+              "sum": 115.905167,
+              "mean": 0.45631955511811023,
+              "median": 0.45625,
+              "p95": 0.736458,
+              "max": 0.93175
+            }
+          },
+          "prepare": {
+            "all": {
+              "count": 388,
+              "sum": 1132.787169,
+              "mean": 2.9195545592783505,
+              "median": 4.2883955,
+              "p95": 4.651625,
+              "max": 5.297458
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 1129.096453,
+              "mean": 4.427829227450981,
+              "median": 4.448292,
+              "p95": 4.709041,
+              "max": 5.297458
+            }
+          },
+          "produce_log": {
+            "all": {
+              "count": 387,
+              "sum": 62.422006,
+              "mean": 0.16129717312661498,
+              "median": 0.091084,
+              "p95": 0.23125,
+              "max": 3.781209
+            },
+            "nonempty": {
+              "count": 254,
+              "sum": 27.07505,
+              "mean": 0.10659468503937009,
+              "median": 0.092459,
+              "p95": 0.203584,
+              "max": 0.788292
+            }
+          },
+          "produce_wait": {
+            "all": {
+              "count": 388,
+              "sum": 450.184037,
+              "mean": 1.1602681365979381,
+              "median": 0.000125,
+              "p95": 3.865042,
+              "max": 10.784459
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 431.665667,
+              "mean": 1.692806537254902,
+              "median": 1.040917,
+              "p95": 4.076625,
+              "max": 10.784459
+            }
+          },
+          "prune": {
+            "all": {
+              "count": 387,
+              "sum": 102.025252,
+              "mean": 0.26363114211886307,
+              "median": 0.27875,
+              "p95": 0.534,
+              "max": 0.688167
+            },
+            "nonempty": {
+              "count": 254,
+              "sum": 69.404127,
+              "mean": 0.273244594488189,
+              "median": 0.289958,
+              "p95": 0.556041,
+              "max": 0.6185
+            }
+          },
+          "rpc_finish": {
+            "all": {
+              "count": 255,
+              "sum": 7.226869,
+              "mean": 0.028340662745098038,
+              "median": 0.027583,
+              "p95": 0.033875,
+              "max": 0.060792
+            }
+          },
+          "tick": {
+            "all": {
+              "count": 388,
+              "sum": 0.0207,
+              "mean": 5.3350515463917524e-05,
+              "median": 4.2e-05,
+              "p95": 0.000125,
+              "max": 0.000209
+            }
+          },
+          "verify": {
+            "all": {
+              "count": 256,
+              "sum": 2420.338959,
+              "mean": 9.45444905859375,
+              "median": 9.4356045,
+              "p95": 9.66275,
+              "max": 11.456792
+            }
+          },
+          "verify_dispatch": {
+            "all": {
+              "count": 255,
+              "sum": 1.66496,
+              "mean": 0.006529254901960785,
+              "median": 0.006667,
+              "p95": 0.009125,
+              "max": 0.027459
+            }
+          }
+        }
+      },
+      {
+        "trace": "/tmp/sfc-tps-investigation-20261022/traces-async/16859.jsonl",
+        "full_verification_batches": 256,
+        "empty_blocks": 136,
+        "phase_duration_ms": {
+          "admit": {
+            "all": {
+              "count": 255,
+              "sum": 961.610878,
+              "mean": 3.7710230509803924,
+              "median": 3.759958,
+              "p95": 3.982708,
+              "max": 4.891834
+            }
+          },
+          "admit_wait": {
+            "all": {
+              "count": 255,
+              "sum": 262.153871,
+              "mean": 1.0280543960784314,
+              "median": 0.191542,
+              "p95": 4.587292,
+              "max": 9.294125
+            }
+          },
+          "background_sync": {
+            "all": {
+              "count": 37,
+              "sum": 147.544669,
+              "mean": 3.987693756756757,
+              "median": 4.28125,
+              "p95": 4.804625,
+              "max": 5.018
+            }
+          },
+          "commit": {
+            "all": {
+              "count": 391,
+              "sum": 1122.633905,
+              "mean": 2.8711864578005115,
+              "median": 3.681667,
+              "p95": 5.266083,
+              "max": 5.856792
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 1099.363083,
+              "mean": 4.311227776470588,
+              "median": 4.366917,
+              "p95": 5.332958,
+              "max": 5.856792
+            }
+          },
+          "history_append": {
+            "all": {
+              "count": 391,
+              "sum": 34.116333,
+              "mean": 0.08725404859335038,
+              "median": 0.083208,
+              "p95": 0.258875,
+              "max": 3.879125
+            }
+          },
+          "maintain": {
+            "all": {
+              "count": 391,
+              "sum": 138.679214,
+              "mean": 0.3546782966751918,
+              "median": 0.374959,
+              "p95": 0.646292,
+              "max": 4.306042
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 99.24075,
+              "mean": 0.3891794117647059,
+              "median": 0.384542,
+              "p95": 0.674584,
+              "max": 0.838959
+            }
+          },
+          "pending_reset": {
+            "all": {
+              "count": 391,
+              "sum": 19.074259,
+              "mean": 0.048783271099744244,
+              "median": 0.062917,
+              "p95": 0.077625,
+              "max": 0.097208
+            }
+          },
+          "postcommit": {
+            "all": {
+              "count": 391,
+              "sum": 157.759795,
+              "mean": 0.40347773657289004,
+              "median": 0.410792,
+              "p95": 0.722375,
+              "max": 4.323917
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 116.700877,
+              "mean": 0.4576504980392157,
+              "median": 0.455584,
+              "p95": 0.744333,
+              "max": 0.91025
+            }
+          },
+          "prepare": {
+            "all": {
+              "count": 391,
+              "sum": 1113.315913,
+              "mean": 2.847355276214834,
+              "median": 4.244,
+              "p95": 4.537958,
+              "max": 5.14225
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 1109.527542,
+              "mean": 4.3510884,
+              "median": 4.340333,
+              "p95": 4.62175,
+              "max": 5.14225
+            }
+          },
+          "produce_log": {
+            "all": {
+              "count": 391,
+              "sum": 57.314124,
+              "mean": 0.14658343734015344,
+              "median": 0.08775,
+              "p95": 0.196916,
+              "max": 3.564833
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 25.567624,
+              "mean": 0.10026519215686275,
+              "median": 0.089458,
+              "p95": 0.196916,
+              "max": 0.466417
+            }
+          },
+          "produce_wait": {
+            "all": {
+              "count": 391,
+              "sum": 428.022589,
+              "mean": 1.0946869283887468,
+              "median": 0.000166,
+              "p95": 3.711417,
+              "max": 10.924
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 409.229668,
+              "mean": 1.6048222274509805,
+              "median": 0.000459,
+              "p95": 3.8735,
+              "max": 10.924
+            }
+          },
+          "prune": {
+            "all": {
+              "count": 391,
+              "sum": 104.042582,
+              "mean": 0.2660935601023018,
+              "median": 0.282875,
+              "p95": 0.538167,
+              "max": 0.5915
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 70.252455,
+              "mean": 0.27549982352941177,
+              "median": 0.292042,
+              "p95": 0.55725,
+              "max": 0.5915
+            }
+          },
+          "rpc_finish": {
+            "all": {
+              "count": 255,
+              "sum": 7.260957,
+              "mean": 0.02847434117647059,
+              "median": 0.0275,
+              "p95": 0.033875,
+              "max": 0.042208
+            }
+          },
+          "tick": {
+            "all": {
+              "count": 391,
+              "sum": 0.019244999999999998,
+              "mean": 4.9219948849104855e-05,
+              "median": 4.2e-05,
+              "p95": 8.4e-05,
+              "max": 0.000167
+            }
+          },
+          "verify": {
+            "all": {
+              "count": 256,
+              "sum": 2426.53924,
+              "mean": 9.47866890625,
+              "median": 9.469375,
+              "p95": 9.713083,
+              "max": 11.018166
+            }
+          },
+          "verify_dispatch": {
+            "all": {
+              "count": 255,
+              "sum": 1.688165,
+              "mean": 0.006620254901960785,
+              "median": 0.006666,
+              "p95": 0.010625,
+              "max": 0.012875
+            }
+          }
+        }
+      },
+      {
+        "trace": "/tmp/sfc-tps-investigation-20261022/traces-async/16876.jsonl",
+        "full_verification_batches": 256,
+        "empty_blocks": 91,
+        "phase_duration_ms": {
+          "admit": {
+            "all": {
+              "count": 255,
+              "sum": 976.963114,
+              "mean": 3.8312278980392156,
+              "median": 3.767125,
+              "p95": 4.231416,
+              "max": 5.183833
+            }
+          },
+          "admit_wait": {
+            "all": {
+              "count": 255,
+              "sum": 1329.282166,
+              "mean": 5.212871239215686,
+              "median": 2.048917,
+              "p95": 25.953625,
+              "max": 84.129625
+            }
+          },
+          "background_sync": {
+            "all": {
+              "count": 47,
+              "sum": 1166.533545,
+              "mean": 24.81986265957447,
+              "median": 14.762042,
+              "p95": 57.21475,
+              "max": 97.954792
+            }
+          },
+          "commit": {
+            "all": {
+              "count": 346,
+              "sum": 1782.557567,
+              "mean": 5.151900482658959,
+              "median": 4.066812499999999,
+              "p95": 13.927167,
+              "max": 85.643625
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 1728.072826,
+              "mean": 6.776756180392157,
+              "median": 4.607209,
+              "p95": 23.758583,
+              "max": 85.643625
+            }
+          },
+          "history_append": {
+            "all": {
+              "count": 346,
+              "sum": 72.303915,
+              "mean": 0.20897085260115605,
+              "median": 0.08964549999999999,
+              "p95": 0.243125,
+              "max": 40.665541
+            }
+          },
+          "maintain": {
+            "all": {
+              "count": 346,
+              "sum": 164.60625,
+              "mean": 0.4757406069364162,
+              "median": 0.384896,
+              "p95": 0.664375,
+              "max": 41.009583
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 141.468624,
+              "mean": 0.5547789176470588,
+              "median": 0.398375,
+              "p95": 0.671625,
+              "max": 41.009583
+            }
+          },
+          "pending_reset": {
+            "all": {
+              "count": 346,
+              "sum": 578.744676,
+              "mean": 1.6726724739884393,
+              "median": 0.0664165,
+              "p95": 7.100459,
+              "max": 8.440333
+            }
+          },
+          "postcommit": {
+            "all": {
+              "count": 346,
+              "sum": 743.339999,
+              "mean": 2.1483815,
+              "median": 0.447604,
+              "p95": 7.694833,
+              "max": 41.079208
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 719.270788,
+              "mean": 2.820669756862745,
+              "median": 0.586584,
+              "p95": 7.903708,
+              "max": 41.079208
+            }
+          },
+          "prepare": {
+            "all": {
+              "count": 346,
+              "sum": 1124.261873,
+              "mean": 3.2493117716763007,
+              "median": 4.329000000000001,
+              "p95": 4.61625,
+              "max": 5.16175
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 1121.797122,
+              "mean": 4.3992044,
+              "median": 4.385083,
+              "p95": 4.647708,
+              "max": 5.16175
+            }
+          },
+          "produce_log": {
+            "all": {
+              "count": 346,
+              "sum": 73.764874,
+              "mean": 0.2131932774566474,
+              "median": 0.088834,
+              "p95": 0.156875,
+              "max": 36.36825
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 25.446996,
+              "mean": 0.09979214117647059,
+              "median": 0.090917,
+              "p95": 0.156875,
+              "max": 0.424458
+            }
+          },
+          "produce_wait": {
+            "all": {
+              "count": 346,
+              "sum": 665.842693,
+              "mean": 1.9244008468208094,
+              "median": 1.151062,
+              "p95": 4.208333,
+              "max": 12.114625
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 648.665027,
+              "mean": 2.543784419607843,
+              "median": 3.559708,
+              "p95": 4.601208,
+              "max": 12.114625
+            }
+          },
+          "prune": {
+            "all": {
+              "count": 346,
+              "sum": 91.748963,
+              "mean": 0.2651704132947977,
+              "median": 0.2899165,
+              "p95": 0.501834,
+              "max": 0.816833
+            },
+            "nonempty": {
+              "count": 255,
+              "sum": 71.094961,
+              "mean": 0.278803768627451,
+              "median": 0.297375,
+              "p95": 0.565667,
+              "max": 0.816833
+            }
+          },
+          "rpc_finish": {
+            "all": {
+              "count": 255,
+              "sum": 7.378501,
+              "mean": 0.028935298039215688,
+              "median": 0.027625,
+              "p95": 0.035541,
+              "max": 0.058708
+            }
+          },
+          "tick": {
+            "all": {
+              "count": 346,
+              "sum": 0.017832999999999998,
+              "mean": 5.154046242774566e-05,
+              "median": 4.2e-05,
+              "p95": 0.000125,
+              "max": 0.000167
+            }
+          },
+          "verify": {
+            "all": {
+              "count": 256,
+              "sum": 2508.019678,
+              "mean": 9.7969518671875,
+              "median": 9.4969585,
+              "p95": 11.775042,
+              "max": 14.944334
+            }
+          },
+          "verify_dispatch": {
+            "all": {
+              "count": 255,
+              "sum": 1.828119,
+              "mean": 0.007169094117647059,
+              "median": 0.007042,
+              "p95": 0.010417,
+              "max": 0.014125
+            }
+          }
+        }
+      }
+    ]
+  },
+  "gpu_path_comparison": {
+    "2048": [
+      {
+        "backend": "gpu",
+        "batch": 2048,
+        "cooperative_limit": "2048",
+        "iterations_per_sample": 10,
+        "max_us": 6939.9125,
+        "median_us": 6919.0375,
+        "min_us": 6879.6625,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 2049,
+        "cooperative_limit": "2048",
+        "iterations_per_sample": 10,
+        "max_us": 8449.9459,
+        "median_us": 8406.1209,
+        "min_us": 8379.5541,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 2304,
+        "cooperative_limit": "2048",
+        "iterations_per_sample": 10,
+        "max_us": 8452.079099999999,
+        "median_us": 8437.7958,
+        "min_us": 8389.4917,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 2560,
+        "cooperative_limit": "2048",
+        "iterations_per_sample": 10,
+        "max_us": 8498.6333,
+        "median_us": 8455.4833,
+        "min_us": 8421.7083,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 2816,
+        "cooperative_limit": "2048",
+        "iterations_per_sample": 10,
+        "max_us": 8585.6791,
+        "median_us": 8517.7792,
+        "min_us": 8472.2459,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 3072,
+        "cooperative_limit": "2048",
+        "iterations_per_sample": 10,
+        "max_us": 8632.6083,
+        "median_us": 8513.05,
+        "min_us": 8485.5625,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 3584,
+        "cooperative_limit": "2048",
+        "iterations_per_sample": 10,
+        "max_us": 8731.9917,
+        "median_us": 8619.3291,
+        "min_us": 8600.8917,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 4096,
+        "cooperative_limit": "2048",
+        "iterations_per_sample": 10,
+        "max_us": 8723.8125,
+        "median_us": 8683.0667,
+        "min_us": 8665.7458,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      }
+    ],
+    "4096": [
+      {
+        "backend": "gpu",
+        "batch": 2048,
+        "cooperative_limit": "4096",
+        "iterations_per_sample": 10,
+        "max_us": 6933.0917,
+        "median_us": 6913.925,
+        "min_us": 6870.0292,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 2049,
+        "cooperative_limit": "4096",
+        "iterations_per_sample": 10,
+        "max_us": 7184.125,
+        "median_us": 7154.1125,
+        "min_us": 7114.2375,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 2304,
+        "cooperative_limit": "4096",
+        "iterations_per_sample": 10,
+        "max_us": 7398.6917,
+        "median_us": 7331.0792,
+        "min_us": 7297.241599999999,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 2560,
+        "cooperative_limit": "4096",
+        "iterations_per_sample": 10,
+        "max_us": 7528.004100000001,
+        "median_us": 7487.2833,
+        "min_us": 7478.779100000002,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 2816,
+        "cooperative_limit": "4096",
+        "iterations_per_sample": 10,
+        "max_us": 9007.8333,
+        "median_us": 8959.0291,
+        "min_us": 8914.9917,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 3072,
+        "cooperative_limit": "4096",
+        "iterations_per_sample": 10,
+        "max_us": 9035.1541,
+        "median_us": 9006.275,
+        "min_us": 8976.2917,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 3584,
+        "cooperative_limit": "4096",
+        "iterations_per_sample": 10,
+        "max_us": 9572.6917,
+        "median_us": 9458.879100000002,
+        "min_us": 9387.2708,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      },
+      {
+        "backend": "gpu",
+        "batch": 4096,
+        "cooperative_limit": "4096",
+        "iterations_per_sample": 10,
+        "max_us": 9751.0083,
+        "median_us": 9655.3834,
+        "min_us": 9627.95,
+        "rayon_threads": 12,
+        "runtime": "mlx-native",
+        "samples": 9,
+        "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+      }
+    ]
+  },
+  "gpu_final": [
+    {
+      "backend": "gpu",
+      "batch": 1,
+      "iterations_per_sample": 10,
+      "max_us": 4904.3167,
+      "median_us": 4875.5208,
+      "min_us": 4851.6375,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 32,
+      "iterations_per_sample": 10,
+      "max_us": 5102.4333,
+      "median_us": 5092.1332999999995,
+      "min_us": 5060.3875,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 256,
+      "iterations_per_sample": 10,
+      "max_us": 5263.204199999999,
+      "median_us": 5254.5833,
+      "min_us": 5240.025,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 1024,
+      "iterations_per_sample": 10,
+      "max_us": 5606.7292,
+      "median_us": 5585.0917,
+      "min_us": 5566.9666,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 2047,
+      "iterations_per_sample": 10,
+      "max_us": 6920.5875,
+      "median_us": 6907.6,
+      "min_us": 6885.85,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 2048,
+      "iterations_per_sample": 10,
+      "max_us": 6939.1917,
+      "median_us": 6893.8792,
+      "min_us": 6881.05,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 2049,
+      "iterations_per_sample": 10,
+      "max_us": 7168.1375,
+      "median_us": 7127.858300000002,
+      "min_us": 7106.525,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 2304,
+      "iterations_per_sample": 10,
+      "max_us": 7361.6667,
+      "median_us": 7322.0791,
+      "min_us": 7268.1125,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 2559,
+      "iterations_per_sample": 10,
+      "max_us": 7525.5125,
+      "median_us": 7480.2208,
+      "min_us": 7451.8125,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 2560,
+      "iterations_per_sample": 10,
+      "max_us": 7509.3832999999995,
+      "median_us": 7476.5208,
+      "min_us": 7410.8375,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 2561,
+      "iterations_per_sample": 10,
+      "max_us": 8511.1375,
+      "median_us": 8500.0042,
+      "min_us": 8480.1875,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    },
+    {
+      "backend": "gpu",
+      "batch": 4096,
+      "iterations_per_sample": 10,
+      "max_us": 8714.0167,
+      "median_us": 8689.6583,
+      "min_us": 8664.4791,
+      "rayon_threads": 12,
+      "runtime": "mlx-native",
+      "samples": 9,
+      "scope": "Native transaction verification; excludes RPC, execution, disk and signing"
+    }
+  ],
+  "persistent_final": {
+    "method": "Separate persistent home, three rounds of 1048576 transfers with generated nonces, same 4096 batch/inflight 1/10 ms/SQLite ON/MLX/12-thread settings. Signing excluded each round. Different warm-up fixture; not mixed into paired summary. No SQLite catch-up wait between rounds.",
+    "trials": [
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 3.870915625,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.009857177734375,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 266.28119667358203,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.336,
+            "total_cpu_seconds": 10.336
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.23999999999999844,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002391584,
+        "rpc_batch": 4096,
+        "seconds": 3.881610917,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792633932.864703,
+        "total_cpu_percent_one_core_100": 266.28119667358203,
+        "total_cpu_seconds": 10.336,
+        "tps": 270139.388625385,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 1
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 3.872319333,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.010584831237792967,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 285.82495018334305,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 11.098999999999998,
+            "total_cpu_seconds": 11.098999999999998
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.2289999999999992,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.002040584,
+        "rpc_batch": 4096,
+        "seconds": 3.883145958,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792633938.294748,
+        "total_cpu_percent_one_core_100": 285.82495018334305,
+        "total_cpu_seconds": 11.098999999999998,
+        "tps": 270032.6002013237,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 2
+      },
+      {
+        "admission_attempts": 1048576,
+        "admission_seconds": 3.862477583,
+        "backend": "gpu",
+        "benchmark": "binary_admission_durable_commit",
+        "benchmark_driver": "rust",
+        "block_interval_ms": 10,
+        "cpu_method": "sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
+        "cpu_ms_per_committed_transaction": 0.00995159149169922,
+        "cpu_usage": [
+          {
+            "cpu_percent_one_core_100": 269.59763487221534,
+            "cpu_records": 0,
+            "gpu_host_cpu_seconds": 0.0,
+            "gpu_records": 1048576,
+            "role": "sequencer",
+            "rust_cpu_seconds": 10.435000000000002,
+            "total_cpu_seconds": 10.435000000000002
+          }
+        ],
+        "follower_replay_included": false,
+        "gpu_runtime": "mlx-native",
+        "inflight": 1,
+        "load_generator_cpu_seconds": 0.23499999999999943,
+        "network_included": true,
+        "nodes": 1,
+        "python_processes": 0,
+        "rayon_threads": 12,
+        "request_preparation": "Rayon raw bytes preparation before timing; ordered typed Capnp batch RPC",
+        "request_preparation_seconds": 0.00214025,
+        "rpc_batch": 4096,
+        "seconds": 3.870582917,
+        "signature_verification_included": true,
+        "sqlite_indexer": true,
+        "sync_transport": "tcp",
+        "timestamp": 1792633943.728292,
+        "total_cpu_percent_one_core_100": 269.59763487221534,
+        "total_cpu_seconds": 10.435000000000002,
+        "tps": 270909.06524558505,
+        "transactions": 1048576,
+        "transport": "tcp",
+        "trial": 3
+      }
+    ]
+  },
+  "validation": {
+    "standard_release_tests_passed": 84,
+    "native_mlx_differential": "passed, including 2559/2560/2561",
+    "cpu_gpu_hybrid_state_replay_parity": "passed",
+    "native_recovery_replication_tests_passed": 3,
+    "clippy_release_all_targets": "passed with -D warnings",
+    "projection_recovery": "SIGKILL after 32 blocks / 32768 transfers, delete all projection files over 8 MiB, recover blocks/world/transaction lookup from RocksDB WAL",
+    "indexer_concurrency": "catch-up completes while execution mutex remains held"
+  },
+  "limitations": [
+    "A low-throughput run remains after the change. Four short pairs do not establish sustained capacity or a reliable tail distribution.",
+    "The median paired improvement and ratio of medians differ because runs occupy fast and slow modes; report both rather than cherry-picking one.",
+    "Traces localize waits to storage synchronization; no block-device tracing identifies the physical OS/device cause of variable fsync latency.",
+    "History projection crash recovery can require reconstructing more bytes; authoritative synchronous RocksDB durability is unchanged.",
+    "GPU crossover measured on M5 Max; not a throughput claim for other hardware, contracts or multi-host networks."
+  ],
+  "diagnostic_exclusions": [
+    "gpu-range-2048.jsonl and gpu-range-4096.jsonl were affected by shared-target workspace artifact reuse and were superseded by the explicitly rebuilt gpu-range-fresh runs.",
+    "All traced, ablation, prototype and persistent trials are separate from the final paired summary."
+  ],
+  "raw_work_directory": "/tmp/sfc-tps-investigation-20261022",
+  "reproduction": "RAYON_NUM_THREADS=12 target/release/sfc-bench bench --binary /path/to/sfc --transactions 1048576 --rpc-batch 4096 --inflight 1 --interval 10 --repeat 1 --sqlite on --output /tmp/result.capnp; alternate retained before/after release binaries."
+}

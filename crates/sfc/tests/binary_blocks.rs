@@ -74,3 +74,55 @@ fn canonical_bytes_and_hash_are_repeatable() {
     assert_eq!(first.hash(), restored.hash());
     assert_eq!(first.state_root(), restored.state_root());
 }
+
+#[test]
+fn local_builder_preserves_bounds_and_external_validation() {
+    use sfc::types::{Log, MAX_BLOCK_BYTES, MAX_BLOCK_TRANSACTIONS, MAX_TX_BYTES};
+    let mut input = draft();
+    input.receipts[0].logs.push(Log {
+        address: "주소".into(),
+        topics: vec!["topic".into(), String::new()],
+        data: "0x0001ff".into(),
+    });
+    input.receipts[1].to = None;
+    input.receipts[1].contract_address = Some("contract".into());
+    let block = Block::build_from(&input).unwrap();
+    let checked = Block::from_bytes(block.shared_bytes()).unwrap();
+    assert_eq!(checked.receipts().unwrap(), input.receipts);
+    assert_eq!(checked.hash(), block.hash());
+    let reader = block.read().unwrap();
+    for receipt in reader
+        .get_root::<storage_capnp::block::Reader>()
+        .unwrap()
+        .get_receipts()
+        .unwrap()
+    {
+        let actual = sfc::binary::receipt_bytes(receipt).unwrap();
+        let mut reference = capnp::message::Builder::new_default();
+        reference.set_root(receipt).unwrap();
+        let encoded = capnp::serialize::write_message_to_words(&reference);
+        let reference = capnp::serialize::read_message_from_flat_slice(
+            &mut encoded.as_slice(),
+            Default::default(),
+        )
+        .unwrap()
+        .canonicalize()
+        .unwrap();
+        assert_eq!(actual.as_ref(), capnp::Word::words_to_bytes(&reference));
+    }
+    input.receipts[0].logs[0].data = "0xnot-hex".into();
+    assert!(Block::build_from(&input).is_err());
+    let mut input = draft();
+    input.transactions[0] = vec![0; MAX_TX_BYTES + 1].into();
+    assert!(Block::build_from(&input).is_err());
+    input.transactions = vec![vec![0; MAX_TX_BYTES].into(); MAX_BLOCK_BYTES / MAX_TX_BYTES + 1];
+    input.receipts = vec![input.receipts[0].clone(); input.transactions.len()];
+    assert!(Block::build_from(&input).is_err());
+    input.transactions = vec![vec![0].into(); MAX_BLOCK_TRANSACTIONS + 1];
+    input.receipts = vec![input.receipts[0].clone(); input.transactions.len()];
+    assert!(Block::build_from(&input).is_err());
+    input.transactions.clear();
+    input.receipts.clear();
+    let empty = Block::build_from(&input).unwrap();
+    assert_eq!(Block::from_bytes(empty.shared_bytes()).unwrap(), empty);
+}

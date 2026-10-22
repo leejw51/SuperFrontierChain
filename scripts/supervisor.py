@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local SFC process supervisor (Python + Cap’n Proto, macOS/Linux)."""
 import argparse
+import json
 import fcntl
 import sfc_codec as codec
 import pathlib
@@ -50,18 +51,23 @@ class Supervisor:
             self.lock = None
             raise RuntimeError('another supervisor owns this test network') from None
         try:
-            manifest = self.home / 'network.capnp'
+            manifest = self.home / 'network.jsonl'
             if manifest.exists():
-                configs = codec.loads(manifest.read_bytes())
+                configs = [json.loads(line) for line in manifest.read_text().splitlines() if line.strip()]
                 if len(configs) != self.count:
                     raise ValueError('existing network has a different node count; use a new home')
+            elif manifest.with_suffix('.capnp').exists():
+                configs = codec.loads(manifest.with_suffix('.capnp').read_bytes())
+                if len(configs) != self.count:
+                    raise ValueError('existing network has a different node count')
+                manifest.write_text(''.join(json.dumps(c)+'\n' for c in configs))
             else:
                 configs = []
                 used_tcp, used_udp = set(), set()
                 for i in range(self.count):
                     node_home = self.home / f'node-{i}'
                     subprocess.run([self.binary, 'init', '--home', node_home], check=True, capture_output=True)
-                    config = codec.loads((node_home / 'config.capnp').read_bytes())
+                    config = codec.loads((node_home / 'config.jsonl').read_bytes())
                     ports = []
                     for base, used, udp in ((self.rpc_port, used_tcp, False), (self.peer_port, used_udp, True)):
                         port = base + i if base else free_port(udp)
@@ -74,11 +80,13 @@ class Supervisor:
                     if i:
                         (node_home / 'genesis.capnp').write_bytes((self.home / 'node-0/genesis.capnp').read_bytes())
                         config['sync_peer'] = dict(transport=self.sync_transport, address=configs[0]['capnp_listen' if self.sync_transport=='tcp' else 'peer_listen'], server_name='localhost', certificate=configs[0]['tls_cert'])
-                    (node_home / 'config.capnp').write_bytes(codec.dumps(config, indent=2))
+                    (node_home / 'config.jsonl').write_bytes(codec.dumps(config, indent=2))
                     configs.append(config)
-                manifest.write_bytes(codec.dumps(configs, indent=2))
+                manifest.write_text(''.join(json.dumps(c)+'\n' for c in configs))
             for i, config in enumerate(configs):
-                path = self.home / f'node-{i}/config.capnp'
+                path = self.home / f'node-{i}/config.jsonl'
+                if not path.exists() and path.with_suffix('.capnp').exists():
+                    path.write_bytes(codec.dumps(codec.loads(path.with_suffix('.capnp').read_bytes())))
                 config = codec.loads(path.read_bytes())
                 if self.block_interval_ms is not None:
                     config['block_interval_ms'] = self.block_interval_ms
@@ -94,7 +102,7 @@ class Supervisor:
     def _spawn(self, node):
         home = self.home / f"node-{node['index']}"
         with (home / 'node.log').open('ab', buffering=0) as log:
-            command = [self.binary, 'run', '--config', home / 'config.capnp']
+            command = [self.binary, 'run', '--config', home / 'config.jsonl']
             if self.verification_backend:
                 command += ['--verification-backend', self.verification_backend]
             if not self.sqlite_indexer:
@@ -148,7 +156,7 @@ class Supervisor:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--home', default='.sfc-testnet-v3')
+    parser.add_argument('--home', default=str(pathlib.Path.home() / '.superfrontierchain/testnet'))
     parser.add_argument('--binary', default=str(ROOT / 'target/debug/sfc'))
     parser.add_argument('--nodes', type=int, default=4)
     parser.add_argument('--rpc-port', type=int, default=8545)

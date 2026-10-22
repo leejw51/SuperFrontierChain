@@ -49,7 +49,7 @@ enum Action {
     Bench(Options),
     /// Stop a managed stress run, optionally also the background service.
     Stop {
-        #[arg(long, default_value = ".sfc-stress-merkle-v1")]
+        #[arg(long, default_value_os_t = sfc::config::persistence_root().join("stress"))]
         home: PathBuf,
         #[arg(long)]
         service_home: Option<PathBuf>,
@@ -68,7 +68,7 @@ struct Options {
     rpc_bind: IpAddr,
     #[arg(long)]
     binary: Option<PathBuf>,
-    #[arg(long, default_value = ".sfc-stress-merkle-v1")]
+    #[arg(long, default_value_os_t = sfc::config::persistence_root().join("stress"))]
     home: PathBuf,
     #[arg(long)]
     output: Option<PathBuf>,
@@ -238,8 +238,8 @@ impl Network {
         };
         for i in 0..options.nodes {
             let node_home = home.join(format!("node-{i}"));
-            let path = node_home.join("config.capnp");
-            if !path.exists() {
+            let path = node_home.join("config.jsonl");
+            if !path.exists() && !path.with_extension("capnp").exists() {
                 let output = Command::new(binary)
                     .args(["init", "--home"])
                     .arg(&node_home)
@@ -249,7 +249,7 @@ impl Network {
                     "init failed: {}",
                     String::from_utf8_lossy(&output.stderr)
                 );
-                let mut config: Config = codec::from_slice(&fs::read(&path)?)?;
+                let mut config: Config = sfc::config::load(&path)?;
                 config.rpc_listen = TcpListener::bind("127.0.0.1:0")?.local_addr()?;
                 config.peer_listen = UdpSocket::bind("127.0.0.1:0")?.local_addr()?;
                 config.capnp_listen = Some(TcpListener::bind("127.0.0.1:0")?.local_addr()?);
@@ -268,9 +268,9 @@ impl Network {
                         certificate: network.nodes[0].config.tls_cert.clone(),
                     });
                 }
-                fs::write(&path, codec::to_vec(&config)?)?;
+                sfc::config::save(&path, &config)?;
             }
-            let mut config: Config = codec::from_slice(&fs::read(&path)?)?;
+            let mut config: Config = sfc::config::load(&path)?;
             for value in [
                 &mut config.data_dir,
                 &mut config.genesis,
@@ -293,7 +293,7 @@ impl Network {
             if config.capnp_listen.is_none() {
                 config.capnp_listen = Some(TcpListener::bind("127.0.0.1:0")?.local_addr()?);
             }
-            fs::write(&path, codec::to_vec(&config)?)?;
+            sfc::config::save(&path, &config)?;
             let log = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -860,6 +860,8 @@ fn check_stress_space(path: &Path, transactions: usize) -> Result<()> {
     }
     // SAFETY: successful statvfs initialized the structure.
     let stats = unsafe { stats.assume_init() };
+    // statvfs field widths vary across Unix targets.
+    #[allow(clippy::unnecessary_cast)]
     let available = (stats.f_bavail as u64).saturating_mul(stats.f_frsize as u64);
     // Reserve space for RocksDB compaction plus conservative per-round history/index growth.
     // This is an early-stop estimate, not a guarantee against other writers filling the disk.
@@ -934,7 +936,7 @@ fn print_info(
         "Sync endpoint (HTTP/3, UDP; typed RPC)":format!("https://{}",node.config.peer_listen),
         "Sync endpoint (Capnp RPC, TCP; default)":format!("capnp://{}",node.config.capnp_listen.context("Capnp sync listener")?),
         "Sync TLS certificate":node.config.tls_cert,"Node home":home.join("node-0"),
-        "Config":home.join("node-0/config.capnp"),"Genesis":node.config.genesis,"Data":data,
+        "Config":home.join("node-0/config.jsonl"),"Genesis":node.config.genesis,"Data":data,
         "Main RocksDB":data.join("rocksdb"),"RocksDB WAL folder":data.join("rocksdb"),
         "RocksDB diagnostics":data.join("rocksdb/LOG"),"History":data.join("history"),
         "SQLite indexing":if sqlite {"on"}else{"off"},"SQLite index (WAL)":data.join("index.sqlite"),

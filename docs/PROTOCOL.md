@@ -43,8 +43,8 @@ one second; an idle follower polls every 100 ms.
 
 ## Configuration
 
-A follower uses a `sync_peer` object in its binary `config.capnp`. Use the
-Python codec to edit it; see [v2 tooling](CAPNP-V3.md). Its fields are `transport`
+A follower uses a `sync_peer` object in its editable `config.jsonl`. Use a text
+editor or the Python adapter; see [v3 tooling](CAPNP-V3.md). Its fields are `transport`
 (`tcp` for new peers), `address`, `server_name`, and `certificate`.
 
 All nodes must share the same genesis. Initialize each node's own identity and data
@@ -158,19 +158,19 @@ health or lag telemetry. SFC uses its own commitments, not Ethereum trie proofs.
 
 Runtime records use [runtime.capnp](../crates/sfc/schema/runtime.capnp).
 `Value` is a recursive typed union with sorted object keys, not a JSON string.
-Files such as config/genesis and dashboard replies contain standard unpacked
-Cap’n Proto messages. History, structured logs, benchmark streams and IPC prefix
+Genesis and dashboard replies contain standard unpacked Cap’n Proto messages.
+Node configuration and the supervisor network manifest use JSONL. History, structured logs, benchmark streams and IPC prefix
 each message with its UInt64 little-endian byte length. GPU IPC uses dedicated
 `RecoveryRequest`/`RecoveryResponse` schemas with binary digest/signature/key fields.
 
 Structured events are stored in `data/logs/node.capnp`; human diagnostics go to
-stderr and the process manager's `node.log`. Hourly `history/*.capnp` is a
+stderr and the process manager's `node.log`. Segmented `history/*.capnp` is a
 recoverable projection of RocksDB. SQLite indexes raw transactions as BLOBs and
 Cap’n Proto block/receipt/log records, with separate SQL columns for search.
 
-State/block hashing uses Cap’n Proto canonicalization and the v2 domain tags
-`sfc/state/v2/capnp` and `sfc/block/v2/capnp`. The canonical segment bytes used for
-hashing differ from the framed message bytes used for storage. Internal Rust
+Block hashing uses canonical Cap’n Proto segments and the `sfc/block/v3/capnp`
+domain. State roots use the [SFC Merkle Patricia trie](MERKLE-TRIE.md).
+Raw block segments are shared by storage and RPC; history adds length framing. Internal Rust
 structures and serde Value adapters remain in memory; this is not a zero-copy
 execution engine. Ethereum RLP and cryptographic preimages retain their prescribed
 binary encodings. Native database files and TLS certificates retain native formats.

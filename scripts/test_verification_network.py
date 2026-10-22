@@ -35,7 +35,7 @@ def run(binary, fixture, modes):
             network.start()
             network.close()
             for i, mode in enumerate(modes):
-                path = pathlib.Path(tmp)/f'node-{i}/config.capnp'
+                path = pathlib.Path(tmp)/f'node-{i}/config.jsonl'
                 config = codec.loads(path.read_bytes())
                 assert config['verification']['backend'] == 'gpu', 'init must default to GPU'
                 # Legacy worker fault tests are opt-in. Native Rust/Metal has no

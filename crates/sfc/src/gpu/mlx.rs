@@ -13,6 +13,9 @@ use std::{
 static GATE: Mutex<()> = Mutex::new(());
 static ERROR: Mutex<String> = Mutex::new(String::new());
 static INIT: Once = Once::new();
+// Native MLX measurements on M5 Max favor cooperative recovery through 2,560
+// records; at 2,816 and above the direct path wins. Both use identical arithmetic.
+const COOPERATIVE_MAX_RECORDS: usize = 2560;
 
 unsafe extern "C" fn error_handler(message: *const c_char, _: *mut c_void) {
     if !message.is_null() {
@@ -283,7 +286,7 @@ impl Core {
                 mlx_dtype__MLX_UINT32,
             ))?
         };
-        let output = if count <= 2048 {
+        let output = if count <= COOPERATIVE_MAX_RECORDS {
             let padded = count.div_ceil(32) * 32;
             let tables =
                 self.cooperative_prepare

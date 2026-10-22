@@ -4,6 +4,8 @@
 
 ## Documentation
 
+- [v0.1.0 release notes](docs/RELEASE-NOTES-v0.1.0.md) · [offline HTML](docs/RELEASE-NOTES-v0.1.0.html).
+
 - [Implementation specification](docs/SPECIFICATION.md): architecture, flow, binary transports and Ethereum RPC support.
 - [HTML specification](docs/SPECIFICATION.html): styled offline edition; rebuild with `npm run build:docs`.
 - [Execution allocation benchmarks](docs/EXECUTION-ALLOCATION-BENCHMARK.md): alternating release throughput/CPU comparison.
@@ -42,7 +44,7 @@ make test-supervisor                 # automated four-node crash/recovery test
 Python 3 is required. Default RPC ports are 8545–8548 and UDP peer ports are
 26656–26659. Submit transactions to node 0 at `http://127.0.0.1:8545`; followers
 are read-only. Each node has its own RocksDB directory and append-only `node.log`
-under `.sfc-testnet-v3/node-N/`. `status.capnp` records child PIDs, process liveness,
+under `~/.superfrontierchain/testnet/node-N/`. `status.capnp` records child PIDs, process liveness,
 RPC URLs, and restart counts; it is not an RPC health check.
 
 The supervisor restarts exited children with exponential backoff, up to five
@@ -76,7 +78,7 @@ make run
 ```
 
 `make run` builds and runs the optimized release binary. Use `make dev` for a debug
-build. Generated files live in `.sfc-v3/`; initialization refuses to overwrite them.
+build. Generated files live in `~/.superfrontierchain/node/`; initialization refuses to overwrite them.
 
 | Setting | Default |
 | --- | --- |
@@ -92,7 +94,7 @@ build. Generated files live in `.sfc-v3/`; initialization refuses to overwrite t
 | Maximum transactions/block | 4,096 |
 | Maximum raw transaction bytes/block | 2 MiB |
 | Pending queue | 16,384 transactions, at most 64 MiB raw bytes |
-| Retention | 604,800 seconds, approximately one week |
+| Retention | 60 seconds |
 
 The funded local account is `0x7e5f4552091a69125d5dfcb7b8c2659029395bdf`,
 with the publicly known private key `0x` followed by 63 zeroes and `1`.
@@ -132,14 +134,14 @@ See [Ethereum compatibility](docs/ETHEREUM.md) for the exact RPC subset and diff
 
 ## Protocol v3: binary internal records
 
-JSON is encoded only at the Ethereum HTTP RPC boundary. Configuration, genesis,
+JSONL is used for editable configuration; JSON is also used at the Ethereum HTTP RPC boundary. Genesis,
 RocksDB values, SQLite records, history, structured logs, dashboard responses,
 legacy GPU worker IPC and supervisor control messages use Cap’n Proto. The default
 native GPU path uses shared Metal buffers without IPC. See
 [protocol v3 formats and tooling](docs/CAPNP-V3.md).
 
-This changes block/state commitments. Default homes are `.sfc-v3`,
-`.sfc-testnet-v3` and `.sfc-stress-merkle-v1`. The Merkle update requires a fresh
+This changes block/state commitments. Default homes are `~/.superfrontierchain/node`,
+`~/.superfrontierchain/testnet` and `~/.superfrontierchain/stress`. The Merkle update requires a fresh
 home if a previous flat-hash chain already exists. Existing homes are preserved;
 never point the new binary at them to continue the old chain. Historical benchmark
 reports in `docs/` retain their original formats and describe protocol v1.
@@ -148,18 +150,18 @@ reports in `docs/` retain their original formats and describe protocol v1.
 
 Create a follower home with `make init DATA_DIR=.sfc-follower`, copy the leader's
 `genesis.capnp` over the follower's generated genesis, and edit the follower's
-`config.capnp` with the binary codec:
+`config.jsonl` with the supervisor configuration adapter:
 
 ```sh
 target/mlx-venv/bin/python - <<'PYCODE'
 import sys
 sys.path.insert(0, 'scripts')
 import sfc_codec as codec
-path = '.sfc-follower/config.capnp'
+path = '.sfc-follower/config.jsonl'
 config = codec.read(path)
 config.update(rpc_listen='127.0.0.1:8546', peer_listen='127.0.0.1:26657')
 config['sync_peer'] = dict(transport='http3', address='127.0.0.1:26656', server_name='localhost',
-                         certificate='/absolute/path/to/leader/.sfc-v3/peer-cert.der')
+                         certificate='/absolute/path/to/leader/peer-cert.der')
 codec.write(path, config)
 PYCODE
 ```
@@ -182,23 +184,26 @@ The native RocksDB WAL/SST format remains binary. RocksDB write-ahead journaling
 explicitly enabled (`disable_wal(false)`), and every block batch waits for WAL sync
 before success. The signing guard uses the same policy. Automatic WAL flushing and
 strict corruption checks are enabled; a corrupt WAL stops startup instead of silently
-recovering an older state. The journal protects commits; hourly Cap’n Proto segments are an inspectable, recoverable history projection.
+recovering an older state. The journal protects commits; retention-sized Cap’n Proto segments are an inspectable, recoverable history projection.
 Restart repairs missing, torn or corrupt Cap’n Proto segments from RocksDB.
+History appends are immediately visible to readers; explicit projection sync runs
+when closing a segment or shutting down cleanly. Recent projection bytes may be
+lost on a crash and are rebuilt from the retained, durably committed RocksDB blocks.
 
 Database history and receipt indexes prune by finalized block timestamp. Current
 balances, contracts, storage, chain head and the EVM's 256-block hash window survive.
-Cap’n Proto retention rounds up by at most one hour, with the latest head retained even
+Cap’n Proto retention rounds up by at most one retention segment (60 seconds by default), with the latest head retained even
 when old. RocksDB disk space is reclaimed by compaction, not necessarily immediately.
 
 Transaction authentication supports **CPU**, **GPU** (default), and **HYBRID**.
 GPU uses integer Metal kernels dispatched through the MLX C API from Rust, with a cooperative
-path for batches up to 2,048 signatures;
+path for batches up to 2,560 signatures;
 HYBRID assigns 40% to GPU and the remainder to Rayon concurrently. All modes
 preserve input order and use sequential EVM state updates. CPU batches below
 32 entries stay serial. `RAYON_NUM_THREADS` controls the CPU worker pool.
 Select a mode with `sfc run --verification-backend cpu|gpu|hybrid`, the
 `SFC_VERIFICATION_BACKEND` environment variable, or `verification.backend` in
-config.capnp (precedence in that order). GPU failure returns an error; a later
+config.jsonl (precedence in that order). GPU failure returns an error; a later
 request restarts the worker. There is no silent CPU fallback. See
 [backend setup, correctness tests and TPS measurements](docs/VERIFICATION-BACKENDS.md).
 
@@ -243,19 +248,19 @@ host). Override with `STRESS_INTERVAL=100` for the earlier cadence or
 `STRESS_THREADS=8` to tune a different machine. Intervals must be at least 1 ms;
 shorter intervals can reduce throughput by creating smaller blocks and more writes.
 Requires Rust, Python 3 (standard library only), the Cap'n Proto compiler and Apple Silicon with Metal. Python supervises process lifecycle only; transaction generation, metrics and MLX run in Rust. One node keeps the same chain across rounds and
-restarts in `.sfc-stress-merkle-v1/node-0`. Startup prints its actual dashboard, Ethereum RPC,
+restarts in `~/.superfrontierchain/stress/node-0`. Startup prints its actual dashboard, Ethereum RPC,
 HTTP/3 sync endpoint, TLS certificate, config, database, index, and log locations.
 Run `make stop` in another terminal (or Ctrl-C) to stop the load generator and node.
 `make stressstart` starts this workload in the background and returns immediately.
-Build progress, startup URLs and TPS output append to `.sfc-processes/stress.log`.
-Use `tail -f .sfc-processes/stress.log` to follow it. Duplicate background starts
+Build progress, startup URLs and TPS output append to `~/.superfrontierchain/supervisor/stress.log`.
+Use `tail -f ~/.superfrontierchain/supervisor/stress.log` to follow it. Duplicate background starts
 return `Already running` successfully. The supervisor lock covers the build as well
 as the running workload, so `make stop` can cancel startup too.
 Stop preserves chain data and logs. A second concurrent stress runner is rejected.
 GPU verification is explicit; failures do not fall back to CPU. Execution and
 storage still run on CPU. Reported CPU includes all Rust node threads
 (100% means one CPU core), excluding the load generator.
-Results append to `.sfc-stress-merkle-v1/results.capnp`; summaries also go to `stress.log`.
+Results append to `~/.superfrontierchain/stress/results.capnp`; summaries also go to `stress.log`.
 Each round checks committed balances/nonces and GPU counters. Signing runs between
 measured rounds, so the displayed round TPS excludes signing time. This measures
 local commits over binary Capnp RPC (TCP by default); follower replay and emergency scenarios remain separate tests.
@@ -284,8 +289,8 @@ index searches.
 make stresstest
 make stop
 make stresstest STRESS_TRANSACTIONS=16384 STRESS_BATCH=1024
-# Also configurable: STRESS_INTERVAL=100 (ms), STRESS_DIR=.sfc-stress-merkle-v1,
-# STRESS_REPORT=.sfc-stress-merkle-v1/results.capnp
+# Also configurable: STRESS_INTERVAL=100 (ms), STRESS_DIR=~/.superfrontierchain/stress,
+# STRESS_REPORT=~/.superfrontierchain/stress/results.capnp
 # make stop discovers repository processes even when STRESS_DIR was overridden.
 ```
 
@@ -314,11 +319,12 @@ stop the node and remove only `index.sqlite` and its `-wal`/`-shm` sidecars;
 already-pruned blocks cannot be rebuilt from the live block store.
 
 Catch-up commits up to 16 blocks or approximately 8 MiB per transaction (a single
-block is never split). Rows and cursors roll back together on failure.
+block is never split). Blocks and the pruning boundary are read from one RocksDB
+snapshot without holding the execution mutex. Rows and cursors roll back together on failure.
 Automatic WAL checkpoints run at 4,096 pages, approximately 16 MiB with default
 SQLite pages. This is a checkpoint trigger, not a hard size limit: long-lived
-readers can delay reclamation. History projection appends also batch their syncs;
-the authoritative RocksDB WAL still syncs every block.
+readers can delay reclamation. History projection sync runs on segment close and
+clean shutdown; the authoritative RocksDB WAL still syncs every block.
 
 Performance measurements and limits are in [PERFORMANCE.md](docs/PERFORMANCE.md).
 No Hyperliquid-equivalent performance claim is made. A 100 ms scheduling interval is
@@ -329,7 +335,7 @@ a target, not a guaranteed distributed finality latency.
 HTTP/3 remains the default peer transport. Both transports expose the same typed
 Cap’n Proto RPC methods: `status`, `submitTransaction`, `getBlock`, `getBlocks`, and `getEncodedBlocks`.
 To additionally enable direct Cap’n Proto RPC over TCP, set this in the serving
-node's `config.capnp`:
+node's `config.jsonl`:
 
 ```python
 config = codec.read(path)
@@ -361,10 +367,10 @@ runs ERC-20 and Python-supervised multi-node tests.
 ## Pruning
 
 Pruning runs automatically after block production/import and on database open.
-The default configuration keeps approximately one week of history:
+The default configuration keeps 60 seconds of history:
 
 ```json
-"retention": { "mode": "pruned", "seconds": 604800 }
+"retention": { "mode": "pruned", "seconds": 60 }
 ```
 
 The cutoff uses the latest committed block timestamp, not wall-clock time. Blocks
@@ -377,9 +383,9 @@ its required history has expired.
 Deletion uses synchronous RocksDB WAL batches capped at 256 blocks or roughly 8 MiB
 of delete operations (checked after each block). Each batch atomically removes
 blocks and their indexes, and restart resumes any unfinished backlog. RocksDB
-compaction reclaims disk space asynchronously. Cap’n Proto files rotate hourly: complete
-expired hours are deleted, so the boundary segment can retain less than an extra
-hour until rotation; restart rebuilds it from retained database records.
+compaction reclaims disk space asynchronously. Cap’n Proto files rotate every min(retention seconds, 60) seconds in pruned mode: complete
+expired segments are deleted, so the boundary segment can retain less than one extra
+segment until rotation; restart rebuilds it from retained database records.
 
 Use `"retention": { "mode": "archive" }` to retain all future history, or initialize
 with `make archive`. Switching to archive cannot recover previously deleted data.
@@ -456,7 +462,7 @@ Transaction bodies and private keys are not included in event fields; panic
 reports include location only. Logging is serialized across threads.
 
 ```sh
-make run-log                         # append to .sfc-v3/node.log
+make run-log                         # append to ~/.superfrontierchain/node/node.log
 make testnet                         # each node has node-N/node.log
 ```
 
@@ -475,9 +481,9 @@ make stop
 ```
 
 `make` alone also shows help. `make start` builds the release binary, initializes
-`.sfc-v3` if needed, and starts one background node. Open
+`~/.superfrontierchain/node` if needed, and starts one background node. Open
 <http://127.0.0.1:8545/dashboard> to view statistics. Node logs append to
-`.sfc-v3/node.log`; Python service diagnostics go to `.sfc-v3/service.log`.
+`~/.superfrontierchain/node/node.log`; Python service diagnostics go to `~/.superfrontierchain/node/service.log`.
 `make stop` stops repository-owned background/foreground nodes, stress runners and
 supervisors (including their descendants). It checks current user, executable/script
 identity and process start time before signaling, waits for exit, then forcibly kills
@@ -518,3 +524,31 @@ its owned Rust process group and waits for shutdown before releasing its lock;
 chain data remains available for the next run. Unresponsive children are killed
 after the shutdown timeout. `make test-stress-signals` verifies both keys through
 a real pseudo-terminal, including reopening the same chain after shutdown.
+
+
+## Editable settings and persistence
+
+The default root is `~/.superfrontierchain`: `node/` for the standalone node,
+`stress/node-0/` for stress tests, `testnet/` for supervised networks, and
+`supervisor/` for process locks and supervisor logs. Existing repository chain
+folders are preserved; they are not moved automatically.
+
+Node settings use **config.jsonl**, one top-level field per line. For example,
+edit this existing line (do not append a duplicate):
+
+```jsonl
+{"retention":{"mode":"pruned","seconds":60}}
+```
+
+Restart the node to apply edits. Any positive integer number of seconds is
+supported; zero and duplicate fields are rejected. Archive mode remains
+`{"retention":{"mode":"archive"}}`. Old `config.capnp` files can still be loaded;
+a JSONL companion is written without deleting the original. Genesis, database
+records, internal RPC and network payloads remain Cap’n Proto.
+
+SQLite removes expired block/transaction/receipt rows following RocksDB's earliest
+retained height and expires indexed logs by wall-clock age. WAL and freed SQLite
+pages are reused; database files do not necessarily shrink immediately. Current
+state is never pruned. Raw diagnostic logs and benchmark reports are separate
+from chain-history retention. A 60-second window is not a disk-space quota, and
+followers offline longer than the available history cannot replay from this node.

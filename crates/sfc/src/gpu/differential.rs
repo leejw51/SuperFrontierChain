@@ -31,7 +31,9 @@ pub(super) fn check(mut recover: impl FnMut(&[RecoveryInput]) -> anyhow::Result<
             .iter()
             .map(|input| input.cpu_recover().ok())
             .collect();
-        for count in [1, 2, 31, 32, 33, 100, 1024, 2047, 2048, 2049, 4095, 4096] {
+        for count in [
+            1, 2, 31, 32, 33, 100, 1024, 2047, 2048, 2049, 2559, 2560, 2561, 4095, 4096,
+        ] {
             assert_eq!(
                 recover(&inputs[..count]).unwrap(),
                 expected[..count],

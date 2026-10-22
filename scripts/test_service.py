@@ -11,7 +11,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='sfc-service-') as tmp:
         home = pathlib.Path(tmp)
         subprocess.run([ROOT / 'target/release/sfc', 'init', '--home', home], check=True, capture_output=True)
-        path = home / 'config.capnp'
+        path = home / 'config.jsonl'
         config = codec.loads(path.read_bytes())
         config.update(rpc_listen=f'127.0.0.1:{port()}', peer_listen=f'127.0.0.1:{port(True)}')
         path.write_bytes(codec.dumps(config))

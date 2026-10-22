@@ -1,5 +1,6 @@
 """Supervisor configuration/control-message adapter; never used by the Rust data path."""
 import os
+import json
 import pathlib
 import struct
 import sys
@@ -98,6 +99,8 @@ def _read_typed(r):
     raise ValueError(f'unsupported inspection type: {kind}')
 
 def dumps(value, **kwargs):
+    if isinstance(value, dict) and "data_dir" in value:
+        return "".join(json.dumps({k:v}, separators=(",",":"))+"\n" for k,v in sorted(value.items())).encode()
     if isinstance(value,dict) and ('data_dir' in value or {'chain_id','timestamp','gas_limit','alloc'}<=set(value)):
         message=schema.Record.new_message(magic=MAGIC,version=1)
         if 'data_dir' in value:_typed_config(message.init('config'),value)
@@ -114,6 +117,14 @@ def dumps(value, **kwargs):
 
 def loads(data):
     if not isinstance(data, bytes): data=bytes(data)
+    if data.lstrip().startswith(b'{'):
+        result = {}
+        for line in data.decode().splitlines():
+            if not line.strip(): continue
+            obj = json.loads(line)
+            if not isinstance(obj, dict) or result.keys() & obj.keys(): raise ValueError('invalid or duplicate JSONL settings')
+            result.update(obj)
+        return result
     if not 8 <= len(data) <= MAX_SIZE: raise ValueError('invalid record size')
     count = struct.unpack_from('<I', data)[0] + 1
     header = ((count + 2) // 2) * 8

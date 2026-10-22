@@ -9,20 +9,19 @@ as the default loopback transport and HTTP/3 for TLS/QUIC peers. See [quickstart
 See the [2026-10-20 review](REVIEW-2026-10-20.md) for verified fixes, determinism
 evidence, production design gaps, the CometBFT/SDK direction and MLX assessment.
 
-```text
-Ethereum clients -- HTTP JSON-RPC --> bounded admission --> pending EVM cache
-                                                           |
-                                                100 ms block scheduler
-                                                           |
-                                               single-pass execution
-                                                           |
-                                               atomic RocksDB commit
-                                                           |
-                                            recoverable Cap’n Proto projection
+## Component architecture
 
-Follower -- TLS + QUIC + HTTP/3 -- Cap'n Proto RPC -- block batches
-     |                                                   |
-     +-- verify ancestry / signatures / replay / root <---+
+```mermaid
+flowchart TB
+    Wallet[Ethereum clients] -->|HTTP JSON-RPC / TCP 8545| Admission[Verification and bounded admission]
+    Peer[Binary peer clients] -->|TCP or HTTP/3 / port 26656| Admission
+    Admission --> Sequencer[Pending queue and block execution]
+    Sequencer --> Storage[State root and atomic RocksDB commit]
+    Storage --> History[Recoverable Cap'n Proto history]
+    Storage --> Index[Asynchronous SQLite index]
+    Storage -->|Canonical blocks via peer RPC| Follower[Independent follower replay]
+    Index --> Dashboard[Dashboard and explorer]
+    Follower --> Replica[Verified follower RocksDB state]
 ```
 
 `types`: deterministic ordered state, blocks, receipts and genesis.
@@ -66,6 +65,16 @@ batches retain ordered per-request dispatch. Followers omit the unused pending E
 cache, but still independently execute and verify every imported block.
 
 ### Transaction lifecycle
+
+```mermaid
+flowchart TB
+    Signed[Signed Ethereum transaction bytes] --> Verify[Check encoding, signature and chain ID]
+    Verify --> Queue[Check nonce and balance; enqueue]
+    Queue --> Execute[Block scheduler executes selected transactions]
+    Execute --> Build[Build state root, block and receipts]
+    Build --> Commit[Commit state and head with synced WAL]
+    Commit --> Publish[Expose receipts and blocks to readers]
+```
 
 1. A client submits signed Ethereum bytes over HTTP JSON-RPC or peer RPC.
 2. Admission validates encoding, chain ID, signature, nonce, balance, and resource

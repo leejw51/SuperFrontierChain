@@ -4,10 +4,13 @@ Status: development implementation, 2026-10-21. This document describes the curr
 Rust code, not a production L1 or full Ethereum conformance claim. Wire schemas
 are authoritative: `crates/sfc/schema/chain.capnp`, `storage.capnp`, `runtime.capnp`.
 
+For listener ports, HTTP/3, Cap’n Proto RPC, Ethereum RPC, configuration and command
+examples, see the [protocol guide](PROTOCOL.md#ports-and-listeners).
+
 ## 1. Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     Wallet[Wallet / Solidity tools] -->|HTTP JSON-RPC| RPC[Ethereum adapter]
     Load[Rust Rayon load generator] -->|Capnp RPC: TCP or HTTP/3| Peer[Peer service]
     RPC --> Verify[CPU / native MLX GPU / HYBRID verifier]
@@ -35,6 +38,16 @@ the operation; they do not silently fall back to CPU. Python is only supervisor 
 control tooling, outside the measured execution/verification path.
 
 ## 2. Transaction and block flow
+
+```mermaid
+flowchart TB
+    Input[Signed transactions from either RPC API] --> Verify[Bounded decoding and signature verification]
+    Verify --> Pending[Ordered admission to pending queue]
+    Pending --> Execution[Select and execute a candidate block]
+    Execution --> Commit[Compute commitments and sync RocksDB WAL]
+    Commit --> Index[Asynchronously index committed data]
+    Commit --> Follower[Followers verify and commit replicated blocks]
+```
 
 1. Receive Ethereum signed RLP transaction bytes (protected legacy or type 2).
 2. Validate batch and payload bounds. Reserve ordered admission capacity before

@@ -20,8 +20,27 @@ pub struct Node {
     pending_db: crate::evm_db::OrderedDb,
     world: World,
     head: Block,
+    direct_indexer: Option<crate::indexer::DirectWriter>,
 }
 impl Node {
+    pub fn enable_direct_indexer(&mut self, batch_blocks: usize) -> Result<()> {
+        ensure!(
+            self.direct_indexer.is_none(),
+            "direct SQLite indexer already enabled"
+        );
+        self.direct_indexer = Some(crate::indexer::DirectWriter::open(
+            self.config.data_dir.clone(),
+            &self.store,
+            batch_blocks,
+        )?);
+        Ok(())
+    }
+    pub fn flush_direct_indexer(&mut self) -> Result<()> {
+        if let Some(indexer) = self.direct_indexer.as_mut() {
+            indexer.flush()?;
+        }
+        Ok(())
+    }
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
@@ -54,6 +73,7 @@ impl Node {
             pending_db,
             world,
             head,
+            direct_indexer: None,
         })
     }
     pub fn submit(&mut self, raw: &[u8]) -> Result<Hash> {
@@ -159,7 +179,9 @@ impl Node {
         )?;
         let block = prepared.block;
         let next = prepared.world;
-        self.store.commit_delta(&block, &next, &self.world)?;
+        let rocksdb_commit = crate::indexer::measure_commit(self.direct_indexer.is_some(), || {
+            self.store.commit_delta(&block, &next, &self.world)
+        })?;
         for _ in 0..prepared.consumed {
             self.pending.pop_front();
         }
@@ -178,6 +200,9 @@ impl Node {
         }
         self.pending_hashes = self.pending.iter().map(|tx| tx.hash).collect();
         self.pending_bytes = self.pending.iter().map(|tx| tx.raw.len()).sum();
+        if let Some(indexer) = self.direct_indexer.as_mut() {
+            indexer.record(&self.store, rocksdb_commit);
+        }
         self.store.maintain()?;
         Ok(block)
     }
@@ -224,9 +249,14 @@ impl Node {
             block.as_bytes() == remote.as_bytes(),
             "remote execution record mismatch"
         );
-        self.store.commit_delta(&block, &world, &self.world)?;
+        let rocksdb_commit = crate::indexer::measure_commit(self.direct_indexer.is_some(), || {
+            self.store.commit_delta(&block, &world, &self.world)
+        })?;
         self.head = block;
         self.world = world;
+        if let Some(indexer) = self.direct_indexer.as_mut() {
+            indexer.record(&self.store, rocksdb_commit);
+        }
         self.store.maintain()?;
         Ok(())
     }

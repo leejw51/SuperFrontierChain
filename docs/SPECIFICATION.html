@@ -252,8 +252,10 @@ Compare paired runs, CPU usage, allocations/live memory and commit latency as we
 <p>The EVM change set is applied in deterministic address order using a sorted contiguous
 vector instead of temporary B-tree nodes. Stable sorting and duplicate-key handling
 preserve the previous last-entry-wins behavior; storage slots are sorted before apply.
-RocksDB transaction keys retain their exact <code>tx/</code> plus 64 lowercase hex-byte format,
-but are now constructed in a 67-byte stack buffer rather than two heap strings.</p>
+That allocation optimization constructed the then-current <code>tx/</code> plus 64 lowercase
+hex-byte keys in a stack buffer. Chain schema 3 now writes <code>tx/</code> plus 32 raw hash
+bytes and an eight-byte height, while retaining reads of the earlier format; see
+<a href="STORAGE-MIGRATIONS.md">storage migrations</a>.</p>
 <p>Single-transaction Capnp RPC now reserves the same ordered admission queue as bulk
 RPC and runs verification on a blocking worker. It no longer performs GPU work while
 holding the node lock on the RPC executor. Mixed single/bulk requests preserve their
@@ -278,11 +280,12 @@ is explicit. Existing configuration values are preserved when loading old homes.
 Legacy Cap’n Proto configs remain readable and are preserved during JSONL migration.
 Genesis and chain/network data remain Cap’n Proto.</p>
 <p>RocksDB expires blocks and receipt indexes relative to the committed head timestamp.
-SQLite asynchronously removes rows older than RocksDB&#39;s earliest retained height,
-including transaction receipts, and expires indexed logs by wall-clock age.
+SQLite uses WAL and appends indexed blocks, transactions, receipts and logs without
+pruning them. Its history is independent of RocksDB retention; blocks pruned
+before indexing can still be skipped and are reported by the index cursor.
 Current state remains. Projection segments rotate at min(retention seconds, 60),
-so a partial boundary segment can retain up to one additional segment. SQLite
-reuses freed pages and RocksDB reclaims physical space during compaction.
+so a partial boundary segment can retain up to one additional segment. RocksDB
+reclaims physical space during compaction; SQLite history continues to grow.
 Raw diagnostic logs and benchmark reports have separate lifetimes; retention
 is not a total disk-size limit.</p>
 <h2 id="10-shared-hashes-and-bounded-block-reads-2026-10-22">10. Shared hashes and bounded block reads — 2026-10-22</h2><p>Block clones share their lazy Keccak cache as well as their immutable Cap&#39;n Proto

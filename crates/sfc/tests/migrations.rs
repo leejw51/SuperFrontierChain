@@ -17,12 +17,24 @@ use std::sync::{Arc, Mutex};
 
 const VERSION: &[u8] = b"meta/schema_version";
 
+fn open_db(path: impl AsRef<std::path::Path>) -> Result<DB, rocksdb::Error> {
+    let path = path.as_ref();
+    let mut options = rocksdb::Options::default();
+    options.create_if_missing(true);
+    if path.join("CURRENT").exists() {
+        let names = DB::list_cf(&options, path)?;
+        DB::open_cf(&options, path, names)
+    } else {
+        DB::open(&options, path)
+    }
+}
+
 #[test]
 fn protocol_one_databases_are_rejected_without_rewriting_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("rocksdb");
     {
-        let db = DB::open_default(&path).unwrap();
+        let db = open_db(&path).unwrap();
         db.put(b"genesis", b"{\"chain_id\":7777}").unwrap();
         db.put(b"world", b"old protocol state").unwrap();
         db.put(VERSION, b"1").unwrap();
@@ -31,7 +43,7 @@ fn protocol_one_databases_are_rejected_without_rewriting_records() {
         .err()
         .unwrap();
     assert!(error.to_string().contains("protocol-v3"));
-    let db = DB::open_default(&path).unwrap();
+    let db = open_db(&path).unwrap();
     assert_eq!(db.get(b"world").unwrap().unwrap(), b"old protocol state");
     assert_eq!(db.get(VERSION).unwrap().unwrap(), b"1");
     assert!(db.get(b"meta/protocol_version").unwrap().is_none());
@@ -98,7 +110,7 @@ fn rocksdb_migration_survives_process_kill_without_close() {
     let hash = store.head_hash().unwrap();
     drop(store);
     {
-        let db = DB::open_default(home.join("rocksdb")).unwrap();
+        let db = open_db(home.join("rocksdb")).unwrap();
         let mut batch = WriteBatch::default();
         batch.delete(VERSION);
         batch.put(b"world", sfc::codec::to_vec(&world).unwrap());
@@ -169,9 +181,12 @@ fn rocksdb_legacy_accounts_migrate_without_changing_chain_and_reopen() {
     let path = dir.path().join("rocksdb");
     let encoded_block;
     {
-        let db = DB::open_default(&path).unwrap();
+        let db = open_db(&path).unwrap();
         encoded_block = db
-            .get(format!("block/{:020}", block.height()))
+            .get_cf(
+                db.cf_handle("blocks").unwrap(),
+                format!("block/{:020}", block.height()),
+            )
             .unwrap()
             .unwrap();
         let mut batch = WriteBatch::default();
@@ -192,11 +207,14 @@ fn rocksdb_legacy_accounts_migrate_without_changing_chain_and_reopen() {
             ROCKSDB_VERSION
         );
     }
-    let db = DB::open_default(&path).unwrap();
+    let db = open_db(&path).unwrap();
     assert_eq!(
-        db.get(format!("block/{:020}", block.height()))
-            .unwrap()
-            .unwrap(),
+        db.get_cf(
+            db.cf_handle("blocks").unwrap(),
+            format!("block/{:020}", block.height())
+        )
+        .unwrap()
+        .unwrap(),
         encoded_block
     );
     let metadata: sfc::types::World =
@@ -215,7 +233,7 @@ fn rocksdb_rejects_newer_versions_and_failed_migration_is_retryable() {
     drop(Store::open(dir.path(), Retention::Archive, &genesis).unwrap());
     let path = dir.path().join("rocksdb");
     {
-        let db = DB::open_default(&path).unwrap();
+        let db = open_db(&path).unwrap();
         db.put(VERSION, sfc::codec::to_vec(&999u32).unwrap())
             .unwrap();
     }
@@ -226,7 +244,7 @@ fn rocksdb_rejects_newer_versions_and_failed_migration_is_retryable() {
         .contains("newer"));
     let world;
     {
-        let db = DB::open_default(&path).unwrap();
+        let db = open_db(&path).unwrap();
         assert_eq!(
             sfc::codec::from_slice::<u32>(&db.get(VERSION).unwrap().unwrap()).unwrap(),
             999
@@ -237,7 +255,7 @@ fn rocksdb_rejects_newer_versions_and_failed_migration_is_retryable() {
     }
     assert!(Store::open(dir.path(), Retention::Archive, &genesis).is_err());
     {
-        let db = DB::open_default(&path).unwrap();
+        let db = open_db(&path).unwrap();
         assert!(db.get(VERSION).unwrap().is_none());
         db.put(b"world", world).unwrap();
     }
@@ -252,7 +270,7 @@ fn signer_migration_preserves_double_sign_protection() {
     let vote = signer.sign(10, 0, Phase::Precommit, Some([1; 32])).unwrap();
     drop(signer);
     {
-        let db = DB::open_default(dir.path()).unwrap();
+        let db = open_db(dir.path()).unwrap();
         db.delete(VERSION).unwrap();
     }
     let mut signer = DurableSigner::open(dir.path(), 7777, key.clone()).unwrap();
@@ -264,7 +282,7 @@ fn signer_migration_preserves_double_sign_protection() {
     assert!(signer.sign(9, 0, Phase::Precommit, None).is_err());
     drop(signer);
     {
-        let db = DB::open_default(dir.path()).unwrap();
+        let db = open_db(dir.path()).unwrap();
         assert_eq!(
             sfc::codec::from_slice::<u32>(&db.get(VERSION).unwrap().unwrap()).unwrap(),
             SIGNER_VERSION
@@ -424,7 +442,7 @@ fn typed_metadata_upgrade_preserves_v3_commitments_and_signer_guard() {
     let root = store.world().unwrap().root();
     drop(store);
     {
-        let db = DB::open_default(home.path().join("rocksdb")).unwrap();
+        let db = open_db(home.path().join("rocksdb")).unwrap();
         db.put(
             b"genesis",
             sfc::codec::to_vec(&serde_json::to_value(&genesis).unwrap()).unwrap(),
@@ -449,7 +467,7 @@ fn typed_metadata_upgrade_preserves_v3_commitments_and_signer_guard() {
         .unwrap();
     drop(signer);
     {
-        let db = DB::open_default(&signer_home).unwrap();
+        let db = open_db(&signer_home).unwrap();
         db.put(
             b"identity",
             sfc::codec::to_vec(&json!([7777, validator])).unwrap(),
@@ -504,7 +522,7 @@ fn rejected_older_protocol_does_not_upgrade_genesis_file() {
     let store = Store::open(&config.data_dir, Retention::Archive, &common::genesis()).unwrap();
     drop(store);
     {
-        let db = DB::open_default(config.data_dir.join("rocksdb")).unwrap();
+        let db = open_db(config.data_dir.join("rocksdb")).unwrap();
         db.put(b"meta/protocol_version", 2u32.to_le_bytes())
             .unwrap();
     }
@@ -515,4 +533,139 @@ fn rejected_older_protocol_does_not_upgrade_genesis_file() {
         .to_string()
         .contains("protocol-v3"));
     assert_eq!(std::fs::read(genesis_path).unwrap(), original);
+}
+
+#[test]
+fn compact_receipt_index_upgrade_reads_legacy_and_new_receipts() {
+    let home = tempfile::tempdir().unwrap();
+    let genesis = common::genesis();
+    let store = Store::open(home.path(), Retention::Archive, &genesis).unwrap();
+    let first_tx = common::transfer(0);
+    let (first, world) = Application::default()
+        .execute_block(
+            &store.head().unwrap(),
+            &store.world().unwrap(),
+            genesis.timestamp + 1,
+            genesis.gas_limit,
+            std::slice::from_ref(&first_tx),
+        )
+        .unwrap();
+    store.commit(&first, &world).unwrap();
+    drop(store);
+    let binary_key = |hash: &[u8]| [b"tx/".as_slice(), hash].concat();
+    let legacy_key = format!("tx/{}", hex::encode(first_tx.hash));
+    {
+        let db = open_db(home.path().join("rocksdb")).unwrap();
+        let mut batch = WriteBatch::default();
+        batch.delete(binary_key(&first_tx.hash));
+        batch.put(&legacy_key, sfc::codec::to_vec(&first.height()).unwrap());
+        batch.put(VERSION, sfc::codec::to_vec(&2u32).unwrap());
+        db.write(batch).unwrap();
+    }
+    let store = Store::open(home.path(), Retention::Archive, &genesis).unwrap();
+    assert_eq!(
+        store.receipt_block(&first_tx.hash).unwrap(),
+        Some(first.clone())
+    );
+    let second_tx = common::transfer(1);
+    let (second, next_world) = Application::default()
+        .execute_block(
+            &first,
+            &world,
+            genesis.timestamp + 2,
+            genesis.gas_limit,
+            std::slice::from_ref(&second_tx),
+        )
+        .unwrap();
+    store.commit(&second, &next_world).unwrap();
+    assert_eq!(
+        store.receipt_block(&second_tx.hash).unwrap(),
+        Some(second.clone())
+    );
+    drop(store);
+    {
+        let db = open_db(home.path().join("rocksdb")).unwrap();
+        assert!(db.get(&legacy_key).unwrap().is_some());
+        assert_eq!(
+            db.get(binary_key(&second_tx.hash)).unwrap().unwrap(),
+            2u64.to_le_bytes()
+        );
+        assert!(db
+            .get(format!("tx/{}", hex::encode(second_tx.hash)))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            sfc::codec::from_slice::<u32>(&db.get(VERSION).unwrap().unwrap()).unwrap(),
+            ROCKSDB_VERSION
+        );
+    }
+    let store = Store::open(home.path(), Retention::Archive, &genesis).unwrap();
+    assert_eq!(store.receipt_block(&first_tx.hash).unwrap(), Some(first));
+    assert_eq!(store.receipt_block(&second_tx.hash).unwrap(), Some(second));
+    assert_eq!(store.world().unwrap(), next_world);
+}
+
+#[test]
+fn block_column_family_migration_resumes_after_partial_move() {
+    for moved_count in [0, 4] {
+        let home = tempfile::tempdir().unwrap();
+        let genesis = common::genesis();
+        let store = Store::open(home.path(), Retention::Archive, &genesis).unwrap();
+        let mut blocks = vec![store.head().unwrap()];
+        let mut world = store.world().unwrap();
+        for nonce in 0..20 {
+            let (block, next) = Application::default()
+                .execute_block(
+                    blocks.last().unwrap(),
+                    &world,
+                    genesis.timestamp + nonce + 1,
+                    genesis.gas_limit,
+                    &[common::transfer(nonce)],
+                )
+                .unwrap();
+            store.commit(&block, &next).unwrap();
+            world = next;
+            blocks.push(block);
+        }
+        drop(store);
+        // Simulate a v3 database interrupted after moving only its first four blocks.
+        // Each remaining block exists in exactly one CF, and v4 is not yet published.
+        {
+            let mut db = open_db(home.path().join("rocksdb")).unwrap();
+            let cf = db.cf_handle("blocks").unwrap();
+            let mut batch = WriteBatch::default();
+            for block in blocks.iter().skip(moved_count) {
+                let key = format!("block/{:020}", block.height());
+                batch.put(&key, block.as_bytes());
+                batch.delete_cf(cf, &key);
+            }
+            batch.put(VERSION, sfc::codec::to_vec(&3u32).unwrap());
+            let mut options = rocksdb::WriteOptions::default();
+            options.set_sync(true);
+            db.write_opt(batch, &options).unwrap();
+            if moved_count == 0 {
+                db.drop_cf("blocks").unwrap();
+            }
+        }
+        for _ in 0..2 {
+            let store = Store::open(home.path(), Retention::Archive, &genesis).unwrap();
+            assert_eq!(store.blocks().unwrap(), blocks);
+            assert_eq!(store.world().unwrap(), world);
+            assert_eq!(
+                store.statistics().unwrap()["schema_version"],
+                ROCKSDB_VERSION
+            );
+            for nonce in 0..20 {
+                assert_eq!(
+                    store.receipt_block(&common::transfer(nonce).hash).unwrap(),
+                    Some(blocks[nonce as usize + 1].clone())
+                );
+            }
+        }
+        let db = open_db(home.path().join("rocksdb")).unwrap();
+        assert!(!db
+            .prefix_iterator(b"block/")
+            .next()
+            .is_some_and(|r| r.unwrap().0.starts_with(b"block/")));
+    }
 }

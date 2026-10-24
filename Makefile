@@ -10,7 +10,8 @@ help:
 	@echo '  make              Show this help'
 	@echo '  make start        Build release and start a background node (auto-init new home)'
 	@echo '  make stop         Stop all blockchain processes belonging to this repository'
-	@echo '  make clearall     Stop nodes and delete default chain homes and repository .sfc* archives'
+	@echo '  make clear        Stop nodes and delete all default chain DBs/homes and repository .sfc* archives'
+	@echo '  make clearall     Alias of make clear (also removes home configuration and certificates)'
 	@echo '  make stressstart  Python-supervised background release/GPU stress test'
 	@echo '  make run          Run release node in foreground'
 	@echo '  make testnet      Run a Python-supervised multi-node network in foreground'
@@ -21,7 +22,8 @@ help:
 	@echo '  make benchmark    Rust-only release TPS/CPU benchmark; SQLite ON/OFF'
 	@echo '  make bench-network  Measure binary admission through two-node durable replay'
 	@echo '  make bench-transports  Compare TCP and HTTP/3 with alternating trial order'
-	@echo '  make stresstest   Continuous release/GPU test; Ctrl-C / Ctrl-Z / make stop'
+	@echo '  make stresstest   Continuous release/GPU test, SQLite OFF; Ctrl-C / Ctrl-Z / make stop'
+	@echo '  make stresstest2  Same stress workload with SQLite ON, direct writes'
 	@echo '  make bench-backends  Compare CPU, native MLX GPU, HYBRID using Rust'
 	@echo '  make test-mlx     Run GPU arithmetic/recovery differential checks only'
 	@echo '  Other: doctor fetch build release schema fmt lint test init archive dev run-log'
@@ -67,7 +69,8 @@ clean:
 
 # Preserve supervisor locks: deleting them could let concurrent starts bypass locking.
 # Remove repository-local and default persistence homes; skip symlink homes.
-.PHONY: clearall
+.PHONY: clear clearall
+clear: clearall
 clearall: stop
 	@set -eu; \
 	for dir in "$(CURDIR)"/.sfc* "$(PERSIST_DIR)/node" "$(PERSIST_DIR)/stress" "$(PERSIST_DIR)/testnet"; do \
@@ -186,19 +189,23 @@ bench-network: release
 		--repeat '$(BENCH_REPEAT)' --sqlite '$(BENCH_SQLITE)' --backend '$(BENCH_BACKEND)' --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)' --sync-transport '$(SYNC_TRANSPORT)'
 
 STRESS_TRANSACTIONS ?= 1048576
+STRESS_ROUNDS ?= 0
 STRESS_BATCH ?= 4096
 STRESS_INTERVAL ?= 10
 STRESS_THREADS ?= 12
-STRESS_SQLITE ?= on
+STRESS_SQLITE ?= off
+STRESS_SQLITE_DIRECT ?= 1
+STRESS_SQLITE_BATCH_BLOCKS ?= 16
 STRESS_BIND ?= 0.0.0.0
 STRESS_DIR ?= $(PERSIST_DIR)/stress
 STRESS_REPORT ?= $(STRESS_DIR)/results.capnp
-.PHONY: stresstest stressstart
+.PHONY: stresstest stresstest2 stressstart
 STRESS_COMMAND = '$(CURDIR)/target/release/sfc-bench' run --binary '$(CURDIR)/target/release/sfc' \
 		--rpc-bind '$(STRESS_BIND)' --nodes 1 --backend gpu --home '$(STRESS_DIR)' --transactions '$(STRESS_TRANSACTIONS)' \
-		--rpc-batch '$(STRESS_BATCH)' --interval '$(STRESS_INTERVAL)' \
-		--output '$(STRESS_REPORT)' --sqlite '$(STRESS_SQLITE)' --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)'
-stresstest:
+		--rpc-batch '$(STRESS_BATCH)' --interval '$(STRESS_INTERVAL)' --rounds '$(STRESS_ROUNDS)' \
+		--output '$(STRESS_REPORT)' --sqlite '$(STRESS_SQLITE)' $(if $(filter 1,$(STRESS_SQLITE_DIRECT)),--sqlite-direct --sqlite-direct-batch-blocks '$(STRESS_SQLITE_BATCH_BLOCKS)',) --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)'
+stresstest2: STRESS_SQLITE = on
+stresstest stresstest2:
 	RAYON_NUM_THREADS='$(STRESS_THREADS)' python3 scripts/stress_supervisor.py run -- $(STRESS_COMMAND)
 stressstart:
 	RAYON_NUM_THREADS='$(STRESS_THREADS)' python3 scripts/stress_supervisor.py start -- $(STRESS_COMMAND)
@@ -287,3 +294,7 @@ test-stress-signals:
 .PHONY: test-config-defaults
 test-config-defaults: release
 	python3 scripts/test_config_defaults.py
+
+.PHONY: test-clear
+test-clear:
+	python3 scripts/test_clear.py

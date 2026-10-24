@@ -411,3 +411,37 @@ fn pruning_removes_receipt_index() {
     store.maintain().unwrap();
     assert!(store.receipt_block(&tx.hash).unwrap().is_none());
 }
+
+#[test]
+fn receipt_indexes_preserve_every_transaction_and_block_order_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let genesis = genesis();
+    let store = Store::open(dir.path(), Retention::Archive, &genesis).unwrap();
+    let transactions: Vec<_> = (0..256).map(transfer).collect();
+    let (block, world) = Application::default()
+        .execute_block(
+            &store.head().unwrap(),
+            &store.world().unwrap(),
+            genesis.timestamp + 1,
+            genesis.gas_limit,
+            &transactions,
+        )
+        .unwrap();
+    let bytes = block.as_bytes().to_vec();
+    store.commit(&block, &world).unwrap();
+    for tx in &transactions {
+        assert_eq!(
+            store.receipt_block(&tx.hash).unwrap().unwrap().as_bytes(),
+            bytes
+        );
+    }
+    drop(store);
+    let store = Store::open(dir.path(), Retention::Archive, &genesis).unwrap();
+    assert_eq!(store.head().unwrap().as_bytes(), bytes);
+    for tx in &transactions {
+        assert_eq!(
+            store.receipt_block(&tx.hash).unwrap().unwrap().as_bytes(),
+            bytes
+        );
+    }
+}

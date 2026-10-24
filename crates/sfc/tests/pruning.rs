@@ -108,3 +108,56 @@ fn short_history_segments_prune_and_restart_removes_boundary_excess() {
         sfc::codec::read_all(&mut std::fs::File::open(&paths[0]).unwrap()).unwrap();
     assert_eq!(blocks, vec![head]);
 }
+
+#[test]
+fn background_expiry_preserves_live_receipts_state_and_restart() {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    let dir = tempfile::tempdir().unwrap();
+    let genesis = common::genesis();
+    let retention = Retention::Pruned { seconds: 2 };
+    let store = Arc::new(Store::open(dir.path(), retention.clone(), &genesis).unwrap());
+    let worker = store.start_pruner().unwrap();
+    let mut head = store.head().unwrap();
+    let mut world = store.world().unwrap();
+    let mut hashes = Vec::new();
+    for nonce in 0..40 {
+        let tx = common::transfer(nonce);
+        hashes.push(tx.hash);
+        let timestamp = genesis.timestamp + if nonce < 32 { 0 } else { 10 };
+        let (next, state) = Application::default()
+            .execute_block(&head, &world, timestamp, genesis.gas_limit, &[tx])
+            .unwrap();
+        store.commit(&next, &state).unwrap();
+        store.maintain().unwrap();
+        assert_eq!(
+            store.receipt_block(hashes.last().unwrap()).unwrap(),
+            Some(next.clone())
+        );
+        head = next;
+        world = state;
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while store.earliest_height().unwrap() != 33 {
+        assert!(
+            Instant::now() < deadline,
+            "background expiry did not catch up"
+        );
+        for hash in &hashes[32..] {
+            assert!(store.receipt_block(hash).unwrap().is_some());
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for hash in &hashes[..32] {
+        assert!(store.receipt_block(hash).unwrap().is_none());
+    }
+    drop(worker);
+    drop(store);
+    let store = Store::open(dir.path(), retention, &genesis).unwrap();
+    assert_eq!(store.head().unwrap(), head);
+    assert_eq!(store.world().unwrap(), world);
+    assert_eq!(store.earliest_height().unwrap(), 33);
+    for hash in &hashes[32..] {
+        assert!(store.receipt_block(hash).unwrap().is_some());
+    }
+}

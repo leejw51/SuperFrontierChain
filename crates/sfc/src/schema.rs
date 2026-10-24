@@ -5,7 +5,9 @@ use anyhow::{ensure, Context, Result};
 use rocksdb::{WriteBatch, DB};
 use rusqlite::{Connection, TransactionBehavior};
 
-pub const ROCKSDB_VERSION: u32 = 2;
+// v3 writes compact binary receipt indexes; the reader/filter also accept v2 keys.
+// v4 isolates block values in a separate CF. Markers prevent unsafe downgrades.
+pub const ROCKSDB_VERSION: u32 = 4;
 pub const SIGNER_VERSION: u32 = 2;
 pub const SQLITE_VERSION: u32 = 3;
 pub(crate) const ROCKSDB_VERSION_KEY: &[u8] = b"meta/schema_version";
@@ -26,7 +28,7 @@ pub(crate) fn check_rocksdb(db: &DB) -> Result<u32> {
     Ok(version)
 }
 
-pub(crate) fn migrate_rocksdb(db: &DB) -> Result<()> {
+pub(crate) fn migrate_rocksdb(db: &mut DB) -> Result<()> {
     let version = check_rocksdb(db)?;
     if version < ROCKSDB_VERSION {
         // v0 had no version marker. Accept both embedded accounts and the current
@@ -36,7 +38,10 @@ pub(crate) fn migrate_rocksdb(db: &DB) -> Result<()> {
                 .context("missing world during migration")?,
         )?;
         let embedded_accounts = !world.accounts.is_empty();
-        for entry in db.prefix_iterator(b"account/") {
+        for entry in db.iterator_opt(
+            rocksdb::IteratorMode::From(b"account/", rocksdb::Direction::Forward),
+            crate::journal::full_scan_options(),
+        ) {
             let (key, value) = entry?;
             if !key.starts_with(b"account/") {
                 break;
@@ -48,8 +53,14 @@ pub(crate) fn migrate_rocksdb(db: &DB) -> Result<()> {
         }
         let height: u64 =
             crate::codec::from_slice(&db.get(b"head")?.context("missing head during migration")?)?;
+        let key = format!("block/{height:020}");
+        let relocated = match db.cf_handle("blocks") {
+            Some(cf) => db.get_cf(cf, &key)?,
+            None => None,
+        };
         let block = Block::from_bytes(
-            db.get(format!("block/{height:020}"))?
+            relocated
+                .or(db.get(&key)?)
                 .context("missing head block during migration")?,
         )?;
         ensure!(
@@ -67,9 +78,9 @@ pub(crate) fn migrate_rocksdb(db: &DB) -> Result<()> {
             world.accounts.clear();
             batch.put(b"world", crate::binary::world_bytes(&world)?);
         }
-        // Data and version become durable together, so a crash retries v0 or
-        // sees complete v1. Never rewrite serialized blocks or their hashes.
-        batch.put(ROCKSDB_VERSION_KEY, crate::codec::to_vec(&ROCKSDB_VERSION)?);
+        // Normalize metadata first. v3 also understands both receipt index formats.
+        // v4 is published only after every block has moved to its own column family.
+        batch.put(ROCKSDB_VERSION_KEY, crate::codec::to_vec(&3u32)?);
         let genesis: crate::types::Genesis = crate::codec::from_slice(
             &db.get(b"genesis")?
                 .context("missing genesis during migration")?,
@@ -77,12 +88,53 @@ pub(crate) fn migrate_rocksdb(db: &DB) -> Result<()> {
         batch.put(b"genesis", crate::codec::to_vec(&genesis)?);
         batch.put(b"head", crate::codec::to_vec(&height)?);
         db.write_opt(batch, &crate::journal::durable_write_options())?;
+        if db.cf_handle("blocks").is_none() {
+            let mut options = rocksdb::Options::default();
+            options.set_compression_type(rocksdb::DBCompressionType::Lz4);
+            db.create_cf("blocks", &options)?;
+        }
+        let cf = db
+            .cf_handle("blocks")
+            .context("missing blocks column family")?;
+        let mut batch = WriteBatch::default();
+        let mut count = 0;
+        for entry in db.iterator_opt(
+            rocksdb::IteratorMode::From(b"block/", rocksdb::Direction::Forward),
+            crate::journal::full_scan_options(),
+        ) {
+            let (key, value) = entry?;
+            if !key.starts_with(b"block/") {
+                break;
+            }
+            if let Some(existing) = db.get_cf(cf, &key)? {
+                ensure!(
+                    existing == value.as_ref(),
+                    "conflicting block copies during migration"
+                );
+            }
+            // Moving a block and deleting its old copy are one synced WAL batch.
+            // A crash leaves the remaining default-CF keys as the resume cursor.
+            batch.put_cf(cf, &key, &value);
+            batch.delete(&key);
+            count += 1;
+            if count >= 256 || batch.size_in_bytes() >= 8 * 1024 * 1024 {
+                db.write_opt(batch, &crate::journal::durable_write_options())?;
+                batch = WriteBatch::default();
+                count = 0;
+            }
+        }
+        batch.put(ROCKSDB_VERSION_KEY, crate::codec::to_vec(&ROCKSDB_VERSION)?);
+        db.write_opt(batch, &crate::journal::durable_write_options())?;
         crate::logging::event(
             "info",
             "schema_migrated",
             serde_json::json!({"database":"rocksdb","from":version,"to":ROCKSDB_VERSION}),
         );
     }
+    ensure!(
+        db.cf_handle("blocks").is_some(),
+        "schema v4 is missing its blocks column family"
+    );
     Ok(())
 }
 

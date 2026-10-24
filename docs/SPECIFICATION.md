@@ -235,8 +235,10 @@ See [alternating before/after measurements](EXECUTION-ALLOCATION-BENCHMARK.md).
 The EVM change set is applied in deterministic address order using a sorted contiguous
 vector instead of temporary B-tree nodes. Stable sorting and duplicate-key handling
 preserve the previous last-entry-wins behavior; storage slots are sorted before apply.
-RocksDB transaction keys retain their exact `tx/` plus 64 lowercase hex-byte format,
-but are now constructed in a 67-byte stack buffer rather than two heap strings.
+That allocation optimization constructed the then-current `tx/` plus 64 lowercase
+hex-byte keys in a stack buffer. Chain schema 3 now writes `tx/` plus 32 raw hash
+bytes and an eight-byte height, while retaining reads of the earlier format; see
+[storage migrations](STORAGE-MIGRATIONS.md).
 
 Single-transaction Capnp RPC now reserves the same ordered admission queue as bulk
 RPC and runs verification on a blocking worker. It no longer performs GPU work while
@@ -276,11 +278,12 @@ Legacy Cap’n Proto configs remain readable and are preserved during JSONL migr
 Genesis and chain/network data remain Cap’n Proto.
 
 RocksDB expires blocks and receipt indexes relative to the committed head timestamp.
-SQLite asynchronously removes rows older than RocksDB's earliest retained height,
-including transaction receipts, and expires indexed logs by wall-clock age.
+SQLite uses WAL and appends indexed blocks, transactions, receipts and logs without
+pruning them. Its history is independent of RocksDB retention; blocks pruned
+before indexing can still be skipped and are reported by the index cursor.
 Current state remains. Projection segments rotate at min(retention seconds, 60),
-so a partial boundary segment can retain up to one additional segment. SQLite
-reuses freed pages and RocksDB reclaims physical space during compaction.
+so a partial boundary segment can retain up to one additional segment. RocksDB
+reclaims physical space during compaction; SQLite history continues to grow.
 Raw diagnostic logs and benchmark reports have separate lifetimes; retention
 is not a total disk-size limit.
 

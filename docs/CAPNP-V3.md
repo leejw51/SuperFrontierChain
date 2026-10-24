@@ -122,9 +122,13 @@ encoding, hash vectors, legacy rejection, and transactional schema upgrades.
 
 ## Compatible schema upgrades within v3
 
-RocksDB schema 2 atomically upgrades genesis/head/version metadata after checking
-the existing state commitment. Receipt-height keys written by older v3 binaries
-remain readable and are naturally replaced/pruned. Signer schema 2 validates and
+RocksDB schema 4 upgrades genesis/head/version metadata after checking
+the existing state commitment. New receipt indexes use raw 32-byte hash keys and
+eight-byte little-endian heights; legacy hexadecimal keys and Cap’n Proto heights
+remain readable. Expired indexes are reclaimed during compaction after durable
+block deletion. Blocks move to a separate column family in bounded atomic batches;
+interrupted moves resume before startup exposes the chain. Block encodings and
+protocol-v3 hashes are unchanged. Signer schema 2 validates and
 rewrites identity/vote records in one synchronous batch, retaining the double-sign
 guard. Legacy `config.capnp` files remain readable; the node writes a JSONL companion
 when one is absent. Configuration writes and compatible genesis upgrades use a

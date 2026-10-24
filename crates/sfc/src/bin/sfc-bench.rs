@@ -99,6 +99,11 @@ struct Options {
     transport: Transport,
     #[arg(long, value_enum, default_value = "on")]
     sqlite: Sqlite,
+    /// Run synchronous SQLite indexing in the block path for latency diagnosis.
+    #[arg(long)]
+    sqlite_direct: bool,
+    #[arg(long, default_value_t = 16)]
+    sqlite_direct_batch_blocks: usize,
 }
 struct Lock {
     _file: File,
@@ -312,6 +317,11 @@ impl Network {
                 });
             if !sqlite {
                 command.arg("--no-indexer");
+            } else if options.sqlite_direct {
+                command
+                    .arg("--sqlite-direct")
+                    .arg("--sqlite-direct-batch-blocks")
+                    .arg(options.sqlite_direct_batch_blocks.to_string());
             }
             let child = command
                 .stdout(Stdio::from(log.try_clone()?))
@@ -800,7 +810,7 @@ fn measure(
         "rpc_batch":options.rpc_batch,"inflight":options.inflight,"block_interval_ms":options.interval,"seconds":seconds,
         "admission_seconds":admission_seconds,"admission_attempts":attempts,"tps":count as f64/seconds,
         "signature_verification_included":true,"network_included":true,"follower_replay_included":network.nodes.len()>1,
-        "sqlite_indexer":sqlite,"rayon_threads":rayon::current_num_threads(),
+        "sqlite_indexer":sqlite,"sqlite_write_mode":if !sqlite { "off" } else if options.sqlite_direct { "direct" } else { "background" },"rayon_threads":rayon::current_num_threads(),
         "timestamp":SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64()}),
     )
 }

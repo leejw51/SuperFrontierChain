@@ -179,6 +179,9 @@ impl Node {
         )?;
         let block = prepared.block;
         let next = prepared.world;
+        if let Some(indexer) = self.direct_indexer.as_mut() {
+            indexer.prepare_retention(&self.store, block.timestamp(), &self.config.retention)?;
+        }
         let rocksdb_commit = crate::indexer::measure_commit(self.direct_indexer.is_some(), || {
             self.store.commit_delta(&block, &next, &self.world)
         })?;
@@ -249,6 +252,9 @@ impl Node {
             block.as_bytes() == remote.as_bytes(),
             "remote execution record mismatch"
         );
+        if let Some(indexer) = self.direct_indexer.as_mut() {
+            indexer.prepare_retention(&self.store, block.timestamp(), &self.config.retention)?;
+        }
         let rocksdb_commit = crate::indexer::measure_commit(self.direct_indexer.is_some(), || {
             self.store.commit_delta(&block, &world, &self.world)
         })?;

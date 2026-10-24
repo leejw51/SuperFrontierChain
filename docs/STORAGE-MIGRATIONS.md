@@ -9,7 +9,7 @@ Only one process may own the node's RocksDB directory.
 | --- | --- | --- | --- |
 | Chain RocksDB | `meta/schema_version` (Cap’n Proto integer) | 4 | Validate state; normalize metadata; enable compact receipt indexes; move blocks to a separate column family in resumable batches. |
 | Signer RocksDB | `meta/schema_version` (Cap’n Proto integer) | 2 | Validate identity and stored vote; atomically upgrade typed records while preserving the anti-double-sign guard. |
-| SQLite index | `PRAGMA user_version` | 3 | v0→v1 adopts/creates the original schema; v1→v2 adds and backfills `blocks.transaction_count` and its populated-block index; v2→v3 converts block headers to typed segments in bounded batches within one transaction. |
+| SQLite index | `PRAGMA user_version` | 5 | v0→v1 adopts/creates the original schema; v1→v2 adds and backfills `blocks.transaction_count` and its populated-block index; v2→v3 converts block headers to typed segments in bounded batches within one transaction; v3→v4 converts transaction keys to binary and clusters rows by height/position; v4→v5 rebuilds address indexes in ascending height/position order. |
 
 Implementation is in `crates/sfc/src/schema.rs`; signer-specific validation is in
 `consensus.rs`. RocksDB migrations run before normal state loading and pruning.
@@ -30,6 +30,23 @@ for the upgrade: DDL, backfill, indexes and version commit together. Normal inde
 then returns to synchronous NORMAL. A failed or interrupted SQLite upgrade rolls
 back and is retried at the next startup. Neither migration resets index cursors,
 logs, receipts, transactions, or pruned-history metadata.
+
+SQLite schema 4 stores transaction hashes and addresses as binary keys in a
+`WITHOUT ROWID` table keyed by `(height, position)`. An eight-byte hash-prefix
+index narrows exact lookups; full hash comparisons and uniqueness triggers
+preserve correctness when prefixes collide. Raw transactions and receipts are
+copied unchanged. The v3→v4 migration validates hexadecimal keys and copies the
+whole transaction table within one atomic transaction. It needs temporary space
+for the replacement table, indexes and WAL; it is not a resumable chunked upgrade.
+Malformed keys or duplicate decoded hashes roll the migration back without
+changing the original table or version. SQLite rows are never pruned.
+
+SQLite schema 5 rebuilds the sender and recipient indexes with ascending height
+and position keys to improve append insertion. Search still returns descending
+height/position order. The two indexes and version change in one transaction;
+transaction bytes, receipts, counters and cursors are unchanged. Existing schema-4
+homes upgrade automatically, including indexes created by development builds.
+Index rebuilding requires temporary disk space and delays startup.
 
 Chain schema 3 writes receipt lookup keys as the three bytes `tx/` followed by
 32 raw hash bytes, with an eight-byte little-endian block height. The reader and
@@ -84,6 +101,6 @@ anti-double-sign protection.
 `cargo test --lib schema::tests` tests process termination before SQLite migration
 commit, rollback, retry, and integrity. `cargo test --test migrations` covers
 legacy account conversion, block-hash preservation, RocksDB process-kill recovery,
-SQLite v0/v1/v2 upgrades, failure rollback, newer-version rejection, repeated
+SQLite v0/v1/v2/v3/v4 upgrades, failure rollback, newer-version rejection, repeated
 startup, and signer protection. Existing journal, indexer and GPU stress lifecycle
 tests also exercise the migrated stores.

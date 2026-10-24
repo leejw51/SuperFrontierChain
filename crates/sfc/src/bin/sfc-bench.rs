@@ -105,7 +105,7 @@ struct Options {
     /// Run synchronous SQLite indexing in the block path for latency diagnosis.
     #[arg(long)]
     sqlite_direct: bool,
-    #[arg(long, default_value_t = 16)]
+    #[arg(long, default_value_t = 128)]
     sqlite_direct_batch_blocks: usize,
 }
 struct Lock {

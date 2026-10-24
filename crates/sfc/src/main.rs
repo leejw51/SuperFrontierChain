@@ -47,7 +47,7 @@ enum Command {
         /// Write the SQLite batch directly from block production/import; records phase timings.
         #[arg(long, conflicts_with = "no_indexer")]
         sqlite_direct: bool,
-        #[arg(long, default_value_t = 16)]
+        #[arg(long, default_value_t = 128)]
         sqlite_direct_batch_blocks: usize,
     },
     /// Query a peer through Cap'n Proto RPC.

@@ -305,7 +305,7 @@ fn legacy_sqlite(db: &Connection, version: u32) {
          CREATE TABLE blocks(height INTEGER PRIMARY KEY,hash TEXT UNIQUE NOT NULL,record BLOB NOT NULL);
          CREATE TABLE transactions(hash TEXT PRIMARY KEY,height INTEGER NOT NULL,position INTEGER NOT NULL,
             sender TEXT NOT NULL,recipient TEXT,raw BLOB NOT NULL,receipt BLOB NOT NULL);
-         INSERT INTO transactions VALUES ('tx1',99,0,'sender','recipient',CAST('preserve signed bytes' AS BLOB),CAST('preserve receipt' AS BLOB));
+         INSERT INTO transactions VALUES (printf('0x%064x',1),99,0,printf('0x%040x',2),printf('0x%040x',3),CAST('preserve signed bytes' AS BLOB),CAST('preserve receipt' AS BLOB));
          CREATE VIRTUAL TABLE logs USING fts5(timestamp_ms UNINDEXED,level,event,message,record UNINDEXED);
          INSERT INTO logs VALUES(1,'info','old_event','old event',NULL);"
     ).unwrap();
@@ -320,6 +320,95 @@ fn legacy_sqlite(db: &Connection, version: u32) {
     db.pragma_update(None, "application_id", 0x53464333)
         .unwrap();
     db.pragma_update(None, "user_version", version).unwrap();
+}
+
+#[test]
+fn sqlite_v3_compaction_rolls_back_bad_keys_and_preserves_exact_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config.clone(), Application::default()).unwrap();
+    node.enable_direct_indexer(1).unwrap();
+    node.submit(&common::transfer(0).raw).unwrap();
+    node.produce(1_000_001).unwrap();
+    drop(node);
+    let db = Connection::open(data.join("index.sqlite")).unwrap();
+    let bytes = db
+        .query_row("SELECT raw,receipt FROM transactions", [], |r| {
+            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })
+        .unwrap();
+    // Reconstruct the exact schema-3 representation from valid indexed records.
+    db.execute_batch("BEGIN IMMEDIATE;
+        ALTER TABLE transactions RENAME TO transactions_compact;
+        CREATE TABLE transactions(hash TEXT PRIMARY KEY,height INTEGER NOT NULL,position INTEGER NOT NULL,sender TEXT NOT NULL,recipient TEXT,raw BLOB NOT NULL,receipt BLOB NOT NULL);
+        INSERT INTO transactions SELECT '0x'||lower(hex(hash)),height,position,'0x'||lower(hex(sender)),CASE WHEN recipient IS NULL THEN NULL ELSE '0x'||lower(hex(recipient)) END,raw,receipt FROM transactions_compact;
+        DROP TABLE transactions_compact;
+        PRAGMA user_version=3; COMMIT;").unwrap();
+    let recipient: String = db
+        .query_row("SELECT recipient FROM transactions", [], |r| r.get(0))
+        .unwrap();
+    db.execute("UPDATE transactions SET recipient='invalid'", [])
+        .unwrap();
+    let mut node = Node::open(config, Application::default()).unwrap();
+    assert!(node.enable_direct_indexer(1).is_err());
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        db.query_row("SELECT typeof(hash) FROM transactions", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        "text"
+    );
+    assert!(db.prepare("SELECT * FROM transactions_v4").is_err());
+    db.execute("UPDATE transactions SET recipient=?1", [recipient])
+        .unwrap();
+    // Distinct legacy TEXT keys that decode to the same hash must not silently
+    // collapse. A failure after creating/copying the new table also rolls back.
+    db.execute("INSERT INTO transactions SELECT upper(hash),height+1,position,sender,recipient,raw,receipt FROM transactions", []).unwrap();
+    assert!(node.enable_direct_indexer(1).is_err());
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM transactions", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert!(db.prepare("SELECT * FROM transactions_v4").is_err());
+    db.execute("DELETE FROM transactions WHERE substr(hash,1,2)='0X'", [])
+        .unwrap();
+    node.enable_direct_indexer(1).unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
+            .unwrap(),
+        SQLITE_VERSION
+    );
+    assert_eq!(
+        db.query_row("SELECT raw,receipt FROM transactions", [], |r| Ok((
+            r.get::<_, Vec<u8>>(0)?,
+            r.get::<_, Vec<u8>>(1)?
+        )))
+        .unwrap(),
+        bytes
+    );
+    assert_eq!(
+        db.query_row("SELECT hex(hash) FROM transactions", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        hex::encode_upper(common::transfer(0).hash)
+    );
+    assert_eq!(
+        db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "ok"
+    );
 }
 
 #[test]
@@ -361,6 +450,19 @@ fn sqlite_upgrades_all_older_versions_preserving_rows_cursors_and_wal() {
                     .get::<_, Vec<u8>>(0))
                     .unwrap(),
                 b"preserve signed bytes"
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT length(hash),length(sender),length(recipient) FROM transactions",
+                    [],
+                    |r| Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?
+                    ))
+                )
+                .unwrap(),
+                (32, 20, 20)
             );
             assert_eq!(
                 db.query_row("SELECT receipt FROM transactions", [], |r| r
@@ -668,4 +770,65 @@ fn block_column_family_migration_resumes_after_partial_move() {
             .next()
             .is_some_and(|r| r.unwrap().0.starts_with(b"block/")));
     }
+}
+
+#[test]
+fn sqlite_v4_address_indexes_upgrade_without_changing_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config.clone(), Application::default()).unwrap();
+    node.enable_direct_indexer(1).unwrap();
+    node.submit(&common::transfer(0).raw).unwrap();
+    node.produce(1_000_001).unwrap();
+    drop(node);
+    let db = Connection::open(data.join("index.sqlite")).unwrap();
+    let before: (Vec<u8>, Vec<u8>) = db
+        .query_row("SELECT raw,receipt FROM transactions", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    db.execute_batch(
+        "BEGIN; DROP INDEX transactions_sender; DROP INDEX transactions_recipient;
+        CREATE INDEX transactions_sender ON transactions(sender,height DESC,position DESC);
+        CREATE INDEX transactions_recipient ON transactions(recipient,height DESC,position DESC);
+        PRAGMA user_version=4; COMMIT;",
+    )
+    .unwrap();
+    let mut node = Node::open(config, Application::default()).unwrap();
+    node.enable_direct_indexer(1).unwrap();
+    drop(node);
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
+            .unwrap(),
+        SQLITE_VERSION
+    );
+    for name in ["transactions_sender", "transactions_recipient"] {
+        let mut statement = db.prepare(&format!("PRAGMA index_xinfo({name})")).unwrap();
+        let descending = statement
+            .query_map([], |r| r.get::<_, u32>(3))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(descending, vec![0, 0, 0]);
+    }
+    assert_eq!(
+        db.query_row("SELECT raw,receipt FROM transactions", [], |r| Ok((
+            r.get::<_, Vec<u8>>(0)?,
+            r.get::<_, Vec<u8>>(1)?
+        )))
+        .unwrap(),
+        before
+    );
+    assert_eq!(
+        db.query_row("SELECT value FROM meta WHERE key='transactions'", [], |r| r
+            .get::<_, u64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "ok"
+    );
 }

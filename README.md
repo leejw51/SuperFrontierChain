@@ -252,9 +252,13 @@ and comparison-benchmark retention defaults remain unchanged. Physical disk
 reclamation can lag while RocksDB compaction runs.
 `make stresstest2` runs the same workload with SQLite indexing enabled and writes
 its SQLite rows directly from block production. Direct INSERTs share a transaction
-until 16 blocks, approximately 8 MiB, or 100 ms has elapsed. These thresholds are
+until 128 blocks, approximately 64 MiB, or 2 seconds has elapsed. These thresholds are
 checked after each block, including empty blocks; clean shutdown also flushes.
-The 100 ms threshold is not an independent timer or a hard latency bound.
+The 2-second threshold is not an independent timer or a hard latency bound.
+Before a produced or imported block advances the pruning cutoff past an
+uncommitted SQLite source block, direct mode catches up and commits that batch.
+If catch-up fails, it refuses that chain advance so the source remains available
+for retry. This also handles timestamp jumps with short retention windows.
 `STRESS_SQLITE_BATCH_BLOCKS=1` reproduces per-block COMMIT.
 `STRESS_SQLITE_DIRECT=0` selects
 the asynchronous background writer for comparison. Direct mode waits for SQLite
@@ -357,13 +361,20 @@ add memory proportional to this bounded batch; SQL connections are never shared
 with Rayon workers. Blocks and the pruning boundary are read from one RocksDB
 snapshot without holding the execution mutex. Rows and cursors roll back together on failure. The height and transaction count
 are updated once per batch; the writer does not scan or delete expired SQLite rows.
-The writer page cache targets 64 MiB. In background mode, automatic WAL checkpoints
+The writer page cache targets 256 MiB. Temporary statement rollback journals use
+memory (`temp_store=MEMORY`), avoiding temporary-file writes during triggered
+INSERTs while retaining statement rollback and database WAL commits. Temporary
+pages add memory beyond the page-cache target. In background mode, automatic WAL checkpoints
 run at 65,536 pages, approximately 256 MiB with default SQLite pages. Direct mode
 keeps INSERT/COMMIT on the producer and uses a separate connection/thread for
 PASSIVE checkpoints, checking the WAL file every 250 ms once it reaches 256 MiB.
-At roughly 512 MiB of active WAL frames it also attempts RESTART to permit WAL
-reuse during continuous writes. Lock waiting is limited to 250 ms per attempt;
-checkpoint I/O itself can take longer and RESTART can briefly block the writer.
+At roughly 512 MiB of active WAL frames it requests a RESTART window after the
+current direct batch commits. The next BEGIN waits for that attempt to finish,
+preventing continuous local writes from starving WAL recycling. SQLite's lock
+waiting is limited to 250 ms per attempt; waiting for the current batch and
+checkpoint I/O can take longer. Long-lived readers can still return busy.
+`sqlite-write-profile.json` separates this wait as `checkpoint_wait_us` and
+retains `last_error` after recovery, while the active error file clears on retry.
 `sqlite-checkpoint-profile.json` records checkpoint timing and sampled peak WAL
 size. An exited worker restores automatic checkpoints at the next flush;
 `checkpoint-error.log` records checkpoint errors. Shutdown joins the worker before

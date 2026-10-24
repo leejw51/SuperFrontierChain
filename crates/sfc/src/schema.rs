@@ -9,7 +9,7 @@ use rusqlite::{Connection, TransactionBehavior};
 // v4 isolates block values in a separate CF. Markers prevent unsafe downgrades.
 pub const ROCKSDB_VERSION: u32 = 4;
 pub const SIGNER_VERSION: u32 = 2;
-pub const SQLITE_VERSION: u32 = 3;
+pub const SQLITE_VERSION: u32 = 5;
 pub(crate) const ROCKSDB_VERSION_KEY: &[u8] = b"meta/schema_version";
 
 pub(crate) fn rocksdb_version(db: &DB) -> Result<u32> {
@@ -264,6 +264,59 @@ fn migrate_sqlite_transaction(tx: &rusqlite::Transaction<'_>) -> Result<u32> {
                 cursor = height;
             }
         }
+        version = 3;
+        tx.pragma_update(None, "user_version", version)?;
+    }
+    if version == 3 {
+        // Validate before decoding: unhex() returns NULL for malformed input,
+        // which must not silently turn an invalid recipient into a missing one.
+        let invalid: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM transactions WHERE
+                typeof(hash)!='text' OR substr(lower(hash),1,2)!='0x' OR length(hash)!=66 OR unhex(substr(hash,3)) IS NULL OR
+                typeof(sender)!='text' OR substr(lower(sender),1,2)!='0x' OR length(sender)!=42 OR unhex(substr(sender,3)) IS NULL OR
+                (recipient IS NOT NULL AND (typeof(recipient)!='text' OR substr(lower(recipient),1,2)!='0x' OR length(recipient)!=42 OR unhex(substr(recipient,3)) IS NULL)))",
+            [], |r| r.get(0),
+        )?;
+        ensure!(
+            !invalid,
+            "invalid hexadecimal transaction index key during SQLite migration"
+        );
+        // The clustered key supports height lookup and reverse keyset pagination.
+        // Prefix collisions remain valid: lookup and uniqueness checks compare
+        // the complete hash. All DDL, copied rows and cursors commit atomically.
+        tx.execute_batch(
+            "CREATE TABLE transactions_v4(
+                hash BLOB NOT NULL CHECK(typeof(hash)='blob' AND length(hash)=32),
+                height INTEGER NOT NULL CHECK(height>=0), position INTEGER NOT NULL CHECK(position>=0),
+                sender BLOB NOT NULL CHECK(typeof(sender)='blob' AND length(sender)=20),
+                recipient BLOB CHECK(recipient IS NULL OR (typeof(recipient)='blob' AND length(recipient)=20)),
+                raw BLOB NOT NULL, receipt BLOB NOT NULL, PRIMARY KEY(height,position)) WITHOUT ROWID;
+             CREATE INDEX transactions_hash_prefix ON transactions_v4(substr(hash,1,8));
+             CREATE INDEX transactions_sender ON transactions_v4(sender,height DESC,position DESC);
+             CREATE INDEX transactions_recipient ON transactions_v4(recipient,height DESC,position DESC);
+             CREATE TRIGGER transactions_unique_hash_insert BEFORE INSERT ON transactions_v4
+             WHEN EXISTS(SELECT 1 FROM transactions_v4 WHERE substr(hash,1,8)=substr(NEW.hash,1,8) AND hash=NEW.hash)
+             BEGIN SELECT RAISE(ABORT,'duplicate transaction hash'); END;
+             CREATE TRIGGER transactions_unique_hash_update BEFORE UPDATE OF hash ON transactions_v4
+             WHEN EXISTS(SELECT 1 FROM transactions_v4 WHERE substr(hash,1,8)=substr(NEW.hash,1,8) AND hash=NEW.hash
+                 AND NOT(height=OLD.height AND position=OLD.position))
+             BEGIN SELECT RAISE(ABORT,'duplicate transaction hash'); END;
+             INSERT INTO transactions_v4 SELECT unhex(substr(hash,3)),height,position,unhex(substr(sender,3)),unhex(substr(recipient,3)),raw,receipt FROM transactions;
+             DROP TABLE transactions;
+             ALTER TABLE transactions_v4 RENAME TO transactions;",
+        )?;
+        version = 4;
+        tx.pragma_update(None, "user_version", version)?;
+    }
+    if version == 4 {
+        // Append increasing heights at the right edge for each address. Queries
+        // can scan these keys backwards to preserve newest-first ordering.
+        tx.execute_batch(
+            "DROP INDEX transactions_sender;
+             DROP INDEX transactions_recipient;
+             CREATE INDEX transactions_sender ON transactions(sender,height,position);
+             CREATE INDEX transactions_recipient ON transactions(recipient,height,position);",
+        )?;
         tx.pragma_update(None, "user_version", SQLITE_VERSION)?;
     }
     Ok(original)

@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -29,6 +29,10 @@ pub struct Indexer {
 // rows, counters, and the height cursor commit in the same SQLite transaction.
 const INDEX_BATCH_BLOCKS: usize = 16;
 const INDEX_BATCH_BYTES: usize = 8 * 1024 * 1024;
+// Direct ingestion amortizes random hash-index page writes across more rows.
+// Source records remain in the authoritative block store until chain retention.
+const DIRECT_BATCH_BYTES: u64 = 64 * 1024 * 1024;
+const DIRECT_BATCH_AGE: Duration = Duration::from_secs(2);
 
 // Keep observational wall-clock profiling outside deterministic execution code.
 // The duration only enters indexer diagnostics, never block/state commitments.
@@ -48,11 +52,14 @@ fn open_writer(path: &Path) -> Result<Connection> {
     // Keep dirty index pages resident across a bounded catch-up batch, and
     // amortize checkpoint fsyncs. NORMAL durability below remains unchanged.
     // At 4 KiB/page the checkpoint trigger is 256 MiB, not a hard WAL size cap.
+    // Triggered INSERTs need statement rollback journals even in WAL mode.
+    // Keep those temporary pages in memory; the database still commits to WAL.
     db.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=FULL;
          PRAGMA wal_autocheckpoint=65536;
-         PRAGMA cache_size=-65536;",
+         PRAGMA temp_store=MEMORY;
+         PRAGMA cache_size=-262144;",
     )?;
     crate::schema::migrate_sqlite(&mut db)?;
     db.execute_batch("PRAGMA synchronous=NORMAL;")?;
@@ -64,9 +71,9 @@ fn meta(db: &Connection, key: &str) -> Result<i64> {
 }
 
 struct PreparedTransaction {
-    hash: String,
-    sender: String,
-    recipient: Option<String>,
+    hash: Vec<u8>,
+    sender: Vec<u8>,
+    recipient: Option<Vec<u8>>,
     raw: Vec<u8>,
     receipt: bytes::Bytes,
 }
@@ -82,10 +89,12 @@ fn prepare_block(block: &Block) -> Result<PreparedBlock> {
     let mut transactions = Vec::with_capacity(block.transaction_count());
     for (raw, receipt) in root.get_transactions()?.iter().zip(root.get_receipts()?) {
         transactions.push(PreparedTransaction {
-            hash: format!("0x{}", hex::encode(receipt.get_transaction_hash()?)),
-            sender: receipt.get_sender()?.to_str()?.to_owned(),
+            hash: receipt.get_transaction_hash()?.to_vec(),
+            sender: hex::decode(receipt.get_sender()?.to_str()?.trim_start_matches("0x"))?,
             recipient: if receipt.get_has_recipient() {
-                Some(receipt.get_recipient()?.to_str()?.to_owned())
+                Some(hex::decode(
+                    receipt.get_recipient()?.to_str()?.trim_start_matches("0x"),
+                )?)
             } else {
                 None
             },
@@ -110,18 +119,36 @@ fn index_block(db: &Connection, block: &PreparedBlock) -> Result<()> {
         block.header.as_ref(),
         block.transactions.len() as u64
     ])?;
-    let mut statement =
-        db.prepare_cached("INSERT INTO transactions VALUES (?1,?2,?3,?4,?5,?6,?7)")?;
-    for (position, row) in block.transactions.iter().enumerate() {
-        statement.execute(params![
-            row.hash,
-            block.height,
-            position as u64,
-            row.sender,
-            row.recipient,
-            row.raw,
-            row.receipt.as_ref()
-        ])?;
+    // One statement per chunk amortizes trigger/statement-journal overhead.
+    // 896 parameters stay below even SQLite's historical 999-parameter limit.
+    const ROWS: usize = 128;
+    let height = i64::try_from(block.height)?;
+    for (chunk, rows) in block.transactions.chunks(ROWS).enumerate() {
+        use rusqlite::types::ValueRef;
+        let sql = format!(
+            "INSERT INTO transactions VALUES {}",
+            std::iter::repeat_n("(?,?,?,?,?,?,?)", rows.len())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let first = i64::try_from(chunk * ROWS)?;
+        let values = rows.iter().enumerate().flat_map(|(position, row)| {
+            [
+                ValueRef::Blob(&row.hash),
+                ValueRef::Integer(height),
+                ValueRef::Integer(first + position as i64),
+                ValueRef::Blob(&row.sender),
+                row.recipient
+                    .as_deref()
+                    .map_or(ValueRef::Null, ValueRef::Blob),
+                ValueRef::Blob(&row.raw),
+                ValueRef::Blob(row.receipt.as_ref()),
+            ]
+        });
+        db.prepare_cached(&sql)?
+            .execute(rusqlite::params_from_iter(
+                values.map(rusqlite::types::ToSqlOutput::Borrowed),
+            ))?;
     }
     Ok(())
 }
@@ -263,6 +290,8 @@ struct WriteMetrics {
     rocksdb_commit_us: u128,
     errors: u64,
     checkpoint_fallbacks: u64,
+    checkpoint_wait_us: u128,
+    last_error: Option<String>,
 }
 
 #[derive(Default, serde::Serialize)]
@@ -287,8 +316,50 @@ impl CheckpointMetrics {
     }
 }
 
+#[derive(Default)]
+struct CheckpointState {
+    writer_active: bool,
+    restart_requested: bool,
+}
+#[derive(Default)]
+struct CheckpointGate {
+    state: Mutex<CheckpointState>,
+    changed: Condvar,
+}
+struct RestartPermit(Arc<CheckpointGate>);
+impl Drop for RestartPermit {
+    fn drop(&mut self) {
+        self.0.state.lock().unwrap().restart_requested = false;
+        self.0.changed.notify_all();
+    }
+}
+impl CheckpointGate {
+    fn request_restart(self: &Arc<Self>, stop: &AtomicBool) -> Option<RestartPermit> {
+        let mut state = self.state.lock().unwrap();
+        state.restart_requested = true;
+        while state.writer_active && !stop.load(Ordering::Acquire) {
+            state = self
+                .changed
+                .wait_timeout(state, Duration::from_millis(50))
+                .unwrap()
+                .0;
+        }
+        if stop.load(Ordering::Acquire) {
+            state.restart_requested = false;
+            self.changed.notify_all();
+            return None;
+        }
+        Some(RestartPermit(self.clone()))
+    }
+    fn writer_idle(&self) {
+        self.state.lock().unwrap().writer_active = false;
+        self.changed.notify_all();
+    }
+}
+
 // Only checkpoint I/O runs here. INSERTs and COMMITs stay on the node thread.
 struct Checkpointer {
+    gate: Arc<CheckpointGate>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -310,6 +381,8 @@ impl Checkpointer {
         let data = data.to_owned();
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
+        let gate = Arc::new(CheckpointGate::default());
+        let checkpoint_gate = gate.clone();
         let thread = thread::Builder::new()
             .name("sfc-sqlite-checkpoint".into())
             .spawn(move || {
@@ -329,9 +402,13 @@ impl Checkpointer {
                                     Ok((row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
                                 })?;
                             if frames > 0 && frames as u64 >= restart_frames {
-                                // Continuous writes can prevent PASSIVE from recycling
-                                // the WAL. Bound lock waiting, then retry on the next pass.
-                                // RESTART can briefly block the writer; it does not prune rows.
+                                // Reserve the next writer-idle window. Readers can still
+                                // return busy after 250 ms, but our own next BEGIN cannot
+                                // race RESTART. No rows are pruned by this operation.
+                                let Some(_permit) = checkpoint_gate.request_restart(&stopping)
+                                else {
+                                    return Ok((frames, done));
+                                };
                                 metrics.restart_attempts += 1;
                                 let (busy, frames, done) =
                                     db.query_row("PRAGMA wal_checkpoint(RESTART)", [], |row| {
@@ -373,9 +450,24 @@ impl Checkpointer {
                 metrics.save(&data);
             })?;
         Ok(Self {
+            gate,
             stop,
             thread: Some(thread),
         })
+    }
+    fn before_begin(&self) -> Duration {
+        let started = std::time::Instant::now();
+        let mut state = self.gate.state.lock().unwrap();
+        while state.restart_requested && !self.finished() {
+            state = self
+                .gate
+                .changed
+                .wait_timeout(state, Duration::from_millis(50))
+                .unwrap()
+                .0;
+        }
+        state.writer_active = true;
+        started.elapsed()
     }
     fn finished(&self) -> bool {
         self.thread
@@ -386,6 +478,7 @@ impl Checkpointer {
 impl Drop for Checkpointer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        self.gate.changed.notify_all();
         if let Some(thread) = self.thread.take() {
             thread.thread().unpark();
             let _ = thread.join();
@@ -402,6 +495,8 @@ pub struct DirectWriter {
     preparation: rayon::ThreadPool,
     metrics: WriteMetrics,
     batch_blocks: usize,
+    committed_height: i64,
+    pending_source_timestamp: Option<u64>,
     pending_blocks: u64,
     pending_bytes: u64,
     pending_since: std::time::Instant,
@@ -422,6 +517,8 @@ impl DirectWriter {
                 .build()?,
             metrics: WriteMetrics::default(),
             batch_blocks,
+            committed_height: -1,
+            pending_source_timestamp: None,
             pending_blocks: 0,
             pending_bytes: 0,
             pending_since: std::time::Instant::now(),
@@ -434,14 +531,63 @@ impl DirectWriter {
             &writer.preparation,
             None,
         )? {}
+        writer.committed_height = meta(&writer.db, "height")?;
         writer.checkpoint = Some(Checkpointer::start(&writer.data, 256 * 1024 * 1024)?);
         writer.db.execute_batch("PRAGMA wal_autocheckpoint=0;")?;
         Ok(writer)
+    }
+    // Commit recoverable index records before advancing the chain's pruning
+    // cutoff past their source blocks. SQLite's in-transaction cursor alone is
+    // insufficient: it disappears on process exit until COMMIT succeeds.
+    pub(crate) fn prepare_retention(
+        &mut self,
+        store: &crate::storage::Store,
+        timestamp: u64,
+        retention: &crate::config::Retention,
+    ) -> Result<()> {
+        let crate::config::Retention::Pruned { seconds } = retention else {
+            return Ok(());
+        };
+        let source_timestamp = if let Some(timestamp) = self.pending_source_timestamp {
+            timestamp
+        } else {
+            let next = (self.committed_height + 1) as u64;
+            if next > store.head()?.height() {
+                return Ok(());
+            }
+            let source = store.block(next)?.ok_or_else(|| {
+                anyhow::anyhow!("uncommitted SQLite source block {next} is missing")
+            })?;
+            let timestamp = source.timestamp();
+            self.pending_source_timestamp = Some(timestamp);
+            timestamp
+        };
+        if source_timestamp >= timestamp.saturating_sub(*seconds) {
+            return Ok(());
+        }
+        let head = store.head()?.height();
+        while meta(&self.db, "height")? < head as i64 {
+            let before = meta(&self.db, "height")?;
+            self.record(store, Duration::ZERO);
+            ensure!(
+                meta(&self.db, "height")? > before,
+                "cannot advance pruning cutoff: SQLite catch-up failed: {}",
+                self.metrics
+                    .last_error
+                    .as_deref()
+                    .unwrap_or("no indexing progress")
+            );
+        }
+        self.flush()?;
+        Ok(())
     }
     pub(crate) fn record(&mut self, store: &crate::storage::Store, rocksdb: std::time::Duration) {
         self.metrics.rocksdb_commit_us += rocksdb.as_micros();
         let result = (|| -> Result<()> {
             if self.db.is_autocommit() {
+                if let Some(checkpoint) = self.checkpoint.as_ref() {
+                    self.metrics.checkpoint_wait_us += checkpoint.before_begin().as_micros();
+                }
                 self.db.execute_batch("BEGIN IMMEDIATE")?;
                 self.pending_since = std::time::Instant::now();
             }
@@ -457,8 +603,8 @@ impl DirectWriter {
             self.pending_blocks += self.metrics.blocks - before_blocks;
             self.pending_bytes += self.metrics.input_bytes - before_bytes;
             if self.pending_blocks >= self.batch_blocks as u64
-                || self.pending_bytes >= INDEX_BATCH_BYTES as u64
-                || self.pending_since.elapsed() >= Duration::from_millis(100)
+                || self.pending_bytes >= DIRECT_BATCH_BYTES
+                || self.pending_since.elapsed() >= DIRECT_BATCH_AGE
             {
                 self.flush()?;
             }
@@ -471,10 +617,15 @@ impl DirectWriter {
             Err(error) => {
                 // Roll back the complete open batch; the durable cursor resumes it.
                 let _ = self.db.execute_batch("ROLLBACK");
+                if let Some(checkpoint) = self.checkpoint.as_ref() {
+                    checkpoint.gate.writer_idle();
+                }
+                self.metrics.last_error = Some(format!("{error:#}"));
                 self.pending_blocks = 0;
                 self.pending_bytes = 0;
                 self.metrics.errors += 1;
                 let _ = std::fs::write(self.data.join("index-error.log"), format!("{error:#}\n"));
+                self.save_metrics();
             }
         }
         if self.metrics.batches.is_multiple_of(100) {
@@ -497,6 +648,11 @@ impl DirectWriter {
         if !self.db.is_autocommit() {
             let started = std::time::Instant::now();
             self.db.execute_batch("COMMIT")?;
+            self.committed_height = meta(&self.db, "height")?;
+            self.pending_source_timestamp = None;
+            if let Some(checkpoint) = self.checkpoint.as_ref() {
+                checkpoint.gate.writer_idle();
+            }
             let elapsed = started.elapsed().as_micros();
             self.metrics.commit_us += elapsed;
             self.metrics.max_commit_us = self.metrics.max_commit_us.max(elapsed);
@@ -519,6 +675,7 @@ impl Drop for DirectWriter {
     fn drop(&mut self) {
         if let Err(error) = self.flush() {
             self.metrics.errors += 1;
+            self.metrics.last_error = Some(format!("{error:#}"));
             let _ = std::fs::write(self.data.join("index-error.log"), format!("{error:#}\n"));
         }
         self.save_metrics();
@@ -652,6 +809,10 @@ pub fn search(data: &Path, query: &Query) -> Result<Value> {
     db.busy_timeout(Duration::from_millis(250))?;
     // Consistent cursor/counts and results even when the writer commits during a query.
     db.execute_batch("BEGIN")?;
+    ensure!(
+        crate::schema::sqlite_version(&db)? == crate::schema::SQLITE_VERSION,
+        "SQLite index requires migration; start the node with indexing enabled"
+    );
     let mut rows = Vec::new();
     let mut next = Value::Null;
     match query.kind.as_str() {
@@ -704,16 +865,30 @@ pub fn search(data: &Path, query: &Query) -> Result<Value> {
             }
         }
         _ => {
-            let sql = if query.q.is_empty() {
-                "SELECT hash,height,raw,receipt,position FROM transactions WHERE (height<?4 OR (height=?4 AND position<?5)) ORDER BY height DESC,position DESC LIMIT ?1"
+            let text = query.q.to_lowercase();
+            let decoded = text.strip_prefix("0x").and_then(|s| hex::decode(s).ok());
+            let (filter, key) = if text.is_empty() {
+                ("1", rusqlite::types::Value::Null)
+            } else if let Ok(height) = text.parse::<i64>() {
+                ("height=?2", rusqlite::types::Value::Integer(height))
+            } else if let Some(hash) = decoded.as_ref().filter(|v| v.len() == 32) {
+                (
+                    "substr(hash,1,8)=substr(?2,1,8) AND hash=?2",
+                    rusqlite::types::Value::Blob(hash.clone()),
+                )
+            } else if let Some(address) = decoded.filter(|v| v.len() == 20) {
+                (
+                    "sender=?2 OR recipient=?2",
+                    rusqlite::types::Value::Blob(address),
+                )
             } else {
-                "SELECT hash,height,raw,receipt,position FROM transactions WHERE (hash=?2 OR sender=?2 OR recipient=?2 OR height=?3) AND (height<?4 OR (height=?4 AND position<?5)) ORDER BY height DESC,position DESC LIMIT ?1"
+                ("0", rusqlite::types::Value::Null)
             };
-            let mut statement = db.prepare(sql)?;
+            let sql = format!("SELECT hash,height,raw,receipt,position FROM transactions WHERE ({filter}) AND (height<?3 OR (height=?3 AND position<?4)) ORDER BY height DESC,position DESC LIMIT ?1");
+            let mut statement = db.prepare(&sql)?;
             let mut found = statement.query(params![
                 limit + 1,
-                query.q.to_lowercase(),
-                query.q.parse::<i64>().unwrap_or(-1),
+                key,
                 query
                     .before_height
                     .unwrap_or(i64::MAX as u64)
@@ -723,7 +898,7 @@ pub fn search(data: &Path, query: &Query) -> Result<Value> {
             while let Some(row) = found.next()? {
                 let raw = format!("0x{}", hex::encode(row.get::<_, Vec<u8>>(2)?));
                 rows.push(
-                    json!({"hash":row.get::<_,String>(0)?, "height":row.get::<_,u64>(1)?,
+                    json!({"hash":format!("0x{}", hex::encode(row.get::<_,Vec<u8>>(0)?)), "height":row.get::<_,u64>(1)?,
                     "position":row.get::<_,u32>(4)?, "transaction":transaction_fields(&raw)?,
                     "raw":if query.kind == "receipts" {None} else {Some(raw)},
                     "receipt":crate::binary::receipt_value(crate::binary::reader(&row.get::<_,Vec<u8>>(3)?)?.get_root::<crate::storage_capnp::receipt::Reader>()?)?}),
@@ -797,6 +972,48 @@ mod checkpoint_tests {
     }
 
     #[test]
+    fn checkpoint_restart_waits_for_commit_and_gates_next_begin() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path();
+        let writer = open_writer(&data.join("index.sqlite")).unwrap();
+        writer.execute_batch("PRAGMA wal_autocheckpoint=0; CREATE TABLE gate_probe(id INTEGER); INSERT INTO gate_probe VALUES(1);").unwrap();
+        let worker = Checkpointer::start(data, 1).unwrap();
+        worker.before_begin();
+        writer
+            .execute_batch("BEGIN IMMEDIATE; INSERT INTO gate_probe VALUES(2);")
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !worker.gate.state.lock().unwrap().restart_requested {
+            assert!(!worker.finished());
+            assert!(
+                std::time::Instant::now() < deadline,
+                "restart never requested"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(worker.gate.state.lock().unwrap().writer_active);
+        writer.execute_batch("COMMIT").unwrap();
+        worker.gate.writer_idle();
+        worker.before_begin(); // Must wait until the reserved RESTART has completed.
+        assert!(!worker.gate.state.lock().unwrap().restart_requested);
+        worker.gate.writer_idle();
+        drop(worker);
+        let metrics: Value = serde_json::from_slice(
+            &std::fs::read(data.join("sqlite-checkpoint-profile.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(metrics["restart_attempts"].as_u64().unwrap() > 0);
+        assert_eq!(metrics["busy_restarts"], 0);
+        assert_eq!(
+            writer
+                .query_row("SELECT count(*) FROM gate_probe", [], |r| r
+                    .get::<_, u64>(0))
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
     fn checkpoint_worker_preserves_reader_snapshot_and_committed_rows() {
         let home = tempfile::tempdir().unwrap();
         let data = home.path();
@@ -813,6 +1030,7 @@ mod checkpoint_tests {
         assert_eq!(count(&reader), 1);
         let worker = Checkpointer::start(data, 1).unwrap();
         for i in 1..=100 {
+            worker.before_begin();
             let tx = writer.transaction().unwrap();
             tx.execute(
                 "INSERT INTO checkpoint_probe VALUES(?1,zeroblob(4096))",
@@ -820,6 +1038,7 @@ mod checkpoint_tests {
             )
             .unwrap();
             tx.commit().unwrap();
+            worker.gate.writer_idle();
         }
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !data.join("sqlite-checkpoint-profile.json").exists() {

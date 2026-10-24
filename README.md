@@ -252,9 +252,9 @@ and comparison-benchmark retention defaults remain unchanged. Physical disk
 reclamation can lag while RocksDB compaction runs.
 `make stresstest2` runs the same workload with SQLite indexing enabled and writes
 its SQLite rows directly from block production. Direct INSERTs share a transaction
-until 128 blocks, approximately 64 MiB, or 2 seconds has elapsed. These thresholds are
+until 1,024 blocks, approximately 512 MiB, or 8 seconds has elapsed. These thresholds are
 checked after each block, including empty blocks; clean shutdown also flushes.
-The 2-second threshold is not an independent timer or a hard latency bound.
+The 8-second threshold is not an independent timer or a hard latency bound.
 Before a produced or imported block advances the pruning cutoff past an
 uncommitted SQLite source block, direct mode catches up and commits that batch.
 If catch-up fails, it refuses that chain advance so the source remains available
@@ -361,7 +361,8 @@ add memory proportional to this bounded batch; SQL connections are never shared
 with Rayon workers. Blocks and the pruning boundary are read from one RocksDB
 snapshot without holding the execution mutex. Rows and cursors roll back together on failure. The height and transaction count
 are updated once per batch; the writer does not scan or delete expired SQLite rows.
-The writer page cache targets 256 MiB. Temporary statement rollback journals use
+The direct writer page cache targets 2 GiB; background indexing retains a 256 MiB
+target. These are cache targets, not process memory limits. Temporary statement rollback journals use
 memory (`temp_store=MEMORY`), avoiding temporary-file writes during triggered
 INSERTs while retaining statement rollback and database WAL commits. Temporary
 pages add memory beyond the page-cache target. In background mode, automatic WAL checkpoints

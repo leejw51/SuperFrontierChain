@@ -30,7 +30,14 @@ pub fn stats(node: &Node) -> Result<Value> {
             })
         })
         .collect();
+    let benchmark = read_info(&node.config.data_dir.join("stress-tps.capnp"));
+    let benchmark = if benchmark["nodePid"].as_u64() == Some(std::process::id() as u64) {
+        benchmark
+    } else {
+        Value::Null
+    };
     Ok(json!({
+        "benchmarkTps":benchmark,
         "chainId":node.genesis.chain_id,"height":head.height(),"headHash":hex_hash(&head.hash()),
         "headTimestamp":head.timestamp(),"earliestHeight":earliest,"retainedBlocks":head.height()-earliest+1,
         "role":if node.config.sync_peer.is_some(){"Follower"}else{"Development sequencer"},

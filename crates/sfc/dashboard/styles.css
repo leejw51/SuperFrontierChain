@@ -17,3 +17,13 @@
 /* Original SFC artwork, served locally with the dashboard. */
 .brand{display:block;overflow:hidden;border-radius:10px}.brand-logo{display:block;width:100%;height:auto;transform:scale(1.35);transform-origin:center}.brand:focus-visible{outline:2px solid #92efd1;outline-offset:4px}
 @media(max-width:700px){.brand{width:180px}.brand-logo{height:64px;object-fit:cover}}
+
+/* SQLite-off stress runs show only the live TPS metric. */
+body.sqlite-off .sidebar, body.sqlite-off .topbar,
+body.sqlite-off footer, body.sqlite-off dialog,
+body.sqlite-off [data-page]:not([data-page="overview"]),
+body.sqlite-off [data-page="overview"] > :not(.metrics),
+body.sqlite-off .metrics > :not(:has(#tps)) { display: none !important; }
+body.sqlite-off .workspace { margin-left: 0; }
+body.sqlite-off .metrics { display: block; max-width: 560px; margin: 10vh auto; }
+body.sqlite-off #tps { font-size: clamp(3rem, 10vw, 6rem); }

@@ -31,8 +31,8 @@ const INDEX_BATCH_BLOCKS: usize = 16;
 const INDEX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 // Direct ingestion amortizes random hash-index page writes across more rows.
 // Source records remain in the authoritative block store until chain retention.
-const DIRECT_BATCH_BYTES: u64 = 64 * 1024 * 1024;
-const DIRECT_BATCH_AGE: Duration = Duration::from_secs(2);
+const DIRECT_BATCH_BYTES: u64 = 512 * 1024 * 1024;
+const DIRECT_BATCH_AGE: Duration = Duration::from_secs(8);
 
 // Keep observational wall-clock profiling outside deterministic execution code.
 // The duration only enters indexer diagnostics, never block/state commitments.
@@ -505,8 +505,8 @@ pub struct DirectWriter {
 impl DirectWriter {
     pub fn open(data: PathBuf, store: &crate::storage::Store, batch_blocks: usize) -> Result<Self> {
         ensure!(
-            (1..=256).contains(&batch_blocks),
-            "SQLite batch blocks must be 1..=256"
+            (1..=1024).contains(&batch_blocks),
+            "SQLite batch blocks must be 1..=1024"
         );
         let mut writer = Self {
             db: open_writer(&data.join("index.sqlite"))?,
@@ -524,6 +524,9 @@ impl DirectWriter {
             pending_since: std::time::Instant::now(),
             checkpoint: None,
         };
+        // Direct stress ingestion keeps dirty index pages across larger batches.
+        // Background indexing retains open_writer's smaller 256 MiB target.
+        writer.db.execute_batch("PRAGMA cache_size=-2097152;")?;
         while step(
             &mut writer.db,
             store,

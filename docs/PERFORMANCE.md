@@ -21,25 +21,27 @@ The signature-recovery microbenchmarks are separate from committed network TPS.
 ## Current SQLite candidate and 60-second validation (2026-10-24)
 
 The retained candidate uses SQLite schema 5 (compact binary keys and ascending
-address indexes), 128-row INSERTs, a 256 MiB page cache, memory-backed temporary
-journals, and direct transactions bounded by 128 blocks / approximately 64 MiB /
-two seconds. A checkpoint gate reserves a writer-idle interval after COMMIT for
-RESTART. Chain WAL remains synced, SQLite is WAL/NORMAL, and SQL rows never prune.
+address indexes), 128-row INSERTs, memory-backed temporary journals and a
+checkpoint gate that reserves a writer-idle interval after COMMIT for RESTART.
+Direct mode now targets a 2 GiB page cache and transactions bounded by 1,024
+blocks / approximately 512 MiB / eight seconds. Background indexing keeps its
+256 MiB cache and existing catch-up limits. Chain WAL remains synced, SQLite is
+WAL/NORMAL, and SQL rows never prune. A guard commits pending SQL records before
+their source blocks expire; failed catch-up refuses that chain advance.
 
-The 20-round, 60-second-retention run measured **84,696 aggregate TPS** and
-**62,036 TPS over the last five rounds**, versus 80,274 and 44,157 before the
-checkpoint gate. Peak observed WAL fell from 14.23 GB to 1.85 GB; RESTART busy
-results fell from 104 to zero. All 20,971,521 SQLite transactions were present,
-with zero skipped blocks/errors and a successful full integrity check.
+With GPU verification, 60-second retention and 20 rounds, the larger direct
+batch/cache measured **153,721 aggregate TPS**, **147,928 TPS over the last five
+rounds**, and a **141,905 TPS minimum**. The previous smaller-batch gated run
+measured 84,696 and 62,036 TPS respectively. This is a combined tuning comparison,
+not an isolation of cache size from transaction size. Final SQL flush is outside
+per-round TPS, and larger batches increase reader-visible indexing delay.
 **Sustained 200,000 TPS is not achieved.** See the [full baseline and comparison](SQLITE-60S-BASELINE.md)
 and [short-run experiments, including rejected changes](SQLITE-MULTIROW-EXPERIMENT.md).
 
-A subsequent correctness guard commits pending SQLite records before production
-or import advances the pruning cutoff past their source blocks. On catch-up
-failure, chain advancement is refused while the source remains available.
-Timestamp-jump, retry, follower and process-exit tests cover this guard; the
-20-round figures above predate it and are not a performance measurement of it.
-Process-exit tests do not simulate power loss or strengthen WAL/NORMAL durability.
+The pruning guard is covered by timestamp-jump, retry, follower and process-exit
+tests. Process-exit tests do not simulate power loss or strengthen WAL/NORMAL
+durability. Larger batches remain bounded by the pruning guard when a shorter
+retention window is selected; the eight-second threshold is not a hard timer.
 
 ## Direct SQLite writes and batch diagnosis (2026-10-24)
 

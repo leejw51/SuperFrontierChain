@@ -105,7 +105,7 @@ struct Options {
     /// Run synchronous SQLite indexing in the block path for latency diagnosis.
     #[arg(long)]
     sqlite_direct: bool,
-    #[arg(long, default_value_t = 128)]
+    #[arg(long, default_value_t = 1024)]
     sqlite_direct_batch_blocks: usize,
 }
 struct Lock {
@@ -994,6 +994,10 @@ fn print_info(
         println!("  {key}: {value}");
         writeln!(log, "{key}: {value}")?;
     }
+    let previous = data.join("stress-tps.capnp");
+    if previous.exists() {
+        fs::remove_file(previous)?;
+    }
     fs::write(data.join("stress-info.capnp"), codec::to_vec(&info)?)?;
     Ok(())
 }
@@ -1066,6 +1070,14 @@ fn execute(mut options: Options, continuous: bool) -> Result<()> {
             trial += 1;
             result["trial"] = trial.into();
             report(&output, &result)?;
+            // Publish the exact completed-round measurement outside the timed workload.
+            let node = &network.nodes[0];
+            let snapshot = json!({"nodePid":node.child.id(),"trial":trial,
+                "tps":result["tps"],"transactions":result["transactions"],
+                "seconds":result["seconds"],"timestamp":result["timestamp"]});
+            let temporary = node.config.data_dir.join("stress-tps.tmp");
+            fs::write(&temporary, codec::to_vec(&snapshot)?)?;
+            fs::rename(temporary, node.config.data_dir.join("stress-tps.capnp"))?;
             let mut log = OpenOptions::new()
                 .create(true)
                 .append(true)

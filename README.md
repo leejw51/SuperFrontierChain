@@ -243,6 +243,13 @@ See [architecture](docs/ARCHITECTURE.md) and [implementation plan](docs/PLAN.md)
 
 `make stresstest` builds release and continuously
 runs one node with native MLX GPU verification and SQLite indexing disabled.
+Stress runs (`stresstest`, `stresstest2`, `stressstart`, and `sfc-bench run`) keep
+only a **5-second block history window**, including when reusing an existing stress
+home. Override with `STRESS_RETENTION_SECONDS` or `--retention-seconds`.
+Expired blocks are removed by the background retention worker; the boundary block,
+current head and chain state remain. SQLite rows are never pruned. Ordinary node
+and comparison-benchmark retention defaults remain unchanged. Physical disk
+reclamation can lag while RocksDB compaction runs.
 `make stresstest2` runs the same workload with SQLite indexing enabled and writes
 its SQLite rows directly from block production. Direct INSERTs share a transaction
 until 16 blocks, approximately 8 MiB, or 100 ms has elapsed. These thresholds are

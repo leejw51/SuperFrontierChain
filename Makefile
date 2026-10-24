@@ -192,6 +192,7 @@ STRESS_TRANSACTIONS ?= 1048576
 STRESS_ROUNDS ?= 0
 STRESS_BATCH ?= 4096
 STRESS_INTERVAL ?= 10
+STRESS_RETENTION_SECONDS ?= 5
 STRESS_THREADS ?= 12
 STRESS_SQLITE ?= off
 STRESS_SQLITE_DIRECT ?= 1
@@ -202,7 +203,7 @@ STRESS_REPORT ?= $(STRESS_DIR)/results.capnp
 .PHONY: stresstest stresstest2 stressstart
 STRESS_COMMAND = '$(CURDIR)/target/release/sfc-bench' run --binary '$(CURDIR)/target/release/sfc' \
 		--rpc-bind '$(STRESS_BIND)' --nodes 1 --backend gpu --home '$(STRESS_DIR)' --transactions '$(STRESS_TRANSACTIONS)' \
-		--rpc-batch '$(STRESS_BATCH)' --interval '$(STRESS_INTERVAL)' --rounds '$(STRESS_ROUNDS)' \
+		--rpc-batch '$(STRESS_BATCH)' --interval '$(STRESS_INTERVAL)' --rounds '$(STRESS_ROUNDS)' --retention-seconds '$(STRESS_RETENTION_SECONDS)' \
 		--output '$(STRESS_REPORT)' --sqlite '$(STRESS_SQLITE)' $(if $(filter 1,$(STRESS_SQLITE_DIRECT)),--sqlite-direct --sqlite-direct-batch-blocks '$(STRESS_SQLITE_BATCH_BLOCKS)',) --gpu-runtime '$(GPU_RUNTIME)' --transport '$(BENCH_TRANSPORT)' --inflight '$(BENCH_INFLIGHT)'
 stresstest2: STRESS_SQLITE = on
 stresstest stresstest2:

@@ -1,5 +1,13 @@
 # Performance measurements
 
+Current stress runs retain only **5 seconds of block history** by default
+(`STRESS_RETENTION_SECONDS=5`, or `sfc-bench run --retention-seconds 5`).
+This applies to reused stress homes too. SQLite history remains append-only and
+is not pruned. Background block deletion and physical compaction can lag the
+logical cutoff; current state, head and the cutoff boundary remain available.
+The dated 60-second measurements below are historical and have not been rerun
+with this shallower window.
+
 Latest native MLX/Cap’n Proto investigation:
 [projection sync stalls, indexer isolation and dispatch tuning](SPECIFICATION.md#11-throughput-stall-investigation-and-follow-up-2026-10-22).
 The dated comparisons below retain their original workloads and persistence policies.
@@ -167,7 +175,7 @@ RAYON_NUM_THREADS=12 ./target/release/sfc-bench run \
   --binary ./target/release/sfc --home /tmp/sfc-sqlite-off-comparison \
   --transactions 1048576 --rounds 50 --rpc-batch 4096 --interval 10 \
   --backend gpu --gpu-runtime mlx-native --transport tcp --inflight 1 \
-  --sqlite off --output /tmp/sfc-sqlite-off-results.capnp
+  --sqlite off --retention-seconds 60 --output /tmp/sfc-sqlite-off-results.capnp
 ```
 
 Each round submits 1,048,576 signed transfers in RPC batches of 4,096 using TCP,
@@ -353,7 +361,8 @@ make release
 RAYON_NUM_THREADS=12 ./target/release/sfc-bench run \
   --binary ./target/release/sfc --home /tmp/sfc-retention-check \
   --transactions 1048576 --rounds 25 --rpc-batch 4096 --interval 10 \
-  --backend gpu --gpu-runtime mlx-native --transport tcp --inflight 1 --sqlite on
+  --backend gpu --gpu-runtime mlx-native --transport tcp --inflight 1 --sqlite on \
+  --retention-seconds 60
 ```
 
 Validation: 85 standard Rust tests passed, 10 optional tests ignored; strict

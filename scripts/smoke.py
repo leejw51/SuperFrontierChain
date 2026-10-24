@@ -78,7 +78,10 @@ def main():
                 wait(lambda: rpc(urls[len(processes)-1], "eth_chainId") == "0x1e61", "RPC startup")
             with urllib.request.urlopen(urls[0] + "/dashboard", timeout=3) as response:
                 assert response.status == 200
-                assert b"SF CHAIN" in response.read()
+                assert response.headers.get_content_type() == "text/html"
+                dashboard = response.read()
+                assert b"Super Frontier Chain" in dashboard
+                assert b'src="/dashboard/assets/dashboard.js"' in dashboard
             with urllib.request.urlopen(urls[0] + "/dashboard/stats", timeout=3) as response:
                 assert response.headers["Cache-Control"] == "no-store"
                 assert response.headers["Content-Type"] == "application/x-capnp"

@@ -212,6 +212,30 @@ registration order. Execute on an isolated state copy; commit only a successful
 block. Consensus primitives, transport and persistence are separate modules.
 See [architecture](docs/ARCHITECTURE.md) and [implementation plan](docs/PLAN.md).
 
+## Continuous integration
+
+[GitHub Actions](.github/workflows/ci.yml) runs on every push and pull request,
+and can also be started manually. The `core` job checks formatting and Clippy,
+runs the Rust suite and the long-lived TCP/HTTP/3 session regression, exercises
+contracts, replication, crash recovery, pruning and Rust/JavaScript codecs via
+`make integration`, and builds release binaries. The independent `tooling` job
+tests dashboard refresh and safe cleanup, then builds dashboard assets and offline
+documentation. Jobs have time limits, cache dependencies, and cancel superseded
+runs for the same event and ref.
+
+CI uses Ubuntu 24.04, stable Rust, Node.js 22 and Python 3.13 for the supervisor.
+Node processes use `SFC_VERIFICATION_BACKEND=cpu`; ignored Metal/MLX and GPU stress
+tests require Apple GPU hardware and remain local checks. To reproduce the core
+checks after installing the prerequisites above and `uv`:
+
+```sh
+uv python install 3.13
+export SFC_VERIFICATION_BACKEND=cpu
+make check
+cargo test --locked -p sfc --test network active_rpc_sessions_survive_one_minute -- --ignored --exact
+make integration release
+```
+
 ## Manage and verify
 
 | Command | Purpose |

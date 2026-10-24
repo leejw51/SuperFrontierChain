@@ -1,22 +1,85 @@
 name: check
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+
 jobs:
   core:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     env:
+      # Hosted Linux runners exercise the CPU path; Metal/MLX tests need Apple GPUs.
       SFC_VERIFICATION_BACKEND: cpu
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: actions/setup-node@v4
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Install Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - uses: astral-sh/setup-uv@v6
-      - run: sudo apt-get update && sudo apt-get install -y capnproto clang libclang-dev
-      - run: make check
-      - run: make integration
-      - run: node scripts/test_dashboard_refresh.mjs
-      - run: make release
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Install supervisor Python
+        run: uv python install 3.13
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends capnproto clang libclang-dev build-essential
+      - name: Check formatting and Clippy
+        run: make lint
+      - name: Run Rust unit and integration tests
+        run: make test
+      - name: Test long-lived TCP and HTTP/3 sessions
+        timeout-minutes: 5
+        run: cargo test --locked -p sfc --test network active_rpc_sessions_survive_one_minute -- --ignored --exact
+      - name: Run contract, transport, recovery, pruning and codec tests
+        timeout-minutes: 40
+        run: make integration
+      - name: Build release binaries
+        run: make release
+
+  tooling:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install Cap'n Proto compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends capnproto
+      - name: Install JavaScript dependencies
+        run: make test-deps
+      - name: Test dashboard refresh and failure handling
+        run: node scripts/test_dashboard_refresh.mjs
+      - name: Test cleanup in disposable directories
+        run: make test-clear
+      - name: Build dashboard assets
+        run: npm run build:dashboard
+      - name: Build offline documentation
+        run: npm run build:docs

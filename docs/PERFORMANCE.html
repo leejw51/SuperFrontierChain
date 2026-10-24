@@ -604,8 +604,7 @@ medians of the three runs; signatures are generated before timing. Each run uses
 81,920 native transfers, 20 blocks of 4,096 transactions, and three accounts.
 The baseline includes the preceding correctness fixes and ordered EVM database.
 There was no existing Git commit to identify it: this repository was an initial
-staged snapshot, and the pre-optimization executable was retained for comparison.
-Raw data: <a href="speed-comparison-2026-10-20.jsonl">speed-comparison-2026-10-20.jsonl</a>.</p>
+staged snapshot, and the pre-optimization executable was retained for comparison.</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -660,12 +659,10 @@ RAYON_NUM_THREADS=18 make bench-network
 python3 scripts/benchmark_network.py --compare /path/to/baseline-sfc --repeat 3</code></pre><p>At an equal 100 ms interval, the three-trial two-node median improved from
 <strong>34,351 to 36,595 tx/s (1.065×)</strong>. Median HTTP admission time fell from
 377.37 ms to 239.81 ms (36.4% lower); the remaining scheduler/replay wait limits
-the end-to-end gain. Raw data, including binary hashes and every trial:
-<a href="network-speed-comparison-2026-10-20.jsonl">network-speed-comparison-2026-10-20.jsonl</a>.</p>
+the end-to-end gain.</p>
 <p>A separate comparison of the <strong>old 500 ms default versus the new 100 ms default</strong>
 measured <strong>7,686 versus 34,620 tx/s (4.50×)</strong>. This combines the code changes with
 faster scheduling; it must not be attributed to execution optimization alone.
-Raw trials: <a href="default-cadence-comparison-2026-10-20.jsonl">default-cadence-comparison-2026-10-20.jsonl</a>.
 Reproduce with <code>python3 scripts/benchmark_network.py --compare /path/to/baseline-sfc --baseline-interval 500 --repeat 3</code>.</p>
 <p>The live benchmark uses two Python-supervised release nodes, 100-item HTTP batches over a persistent connection,
 16,384 signed native transfers, and a 100 ms block interval. Timing ends when the
@@ -692,10 +689,9 @@ are retained for historical context. Use the current comparison above instead.</
 <p>Measured locally on 2026-10-19, macOS arm64, Rust 1.99.0, Cargo release profile with
 thin LTO. CPU model and storage model were not available to the benchmark. These are
 single-machine native-transfer microbenchmarks with three live accounts. They are
-not ERC-20, large-state, HTTP/3 end-to-end or multi-validator throughput measurements.
-Raw results are checked in as <a href="benchmark-results.jsonl">benchmark-results.jsonl</a>.</p>
+not ERC-20, large-state, HTTP/3 end-to-end or multi-validator throughput measurements.</p>
 <h2 id="historical-rerun-2026-10-19">Historical rerun (2026-10-19)</h2><p>After the sync/pruning checks, <code>SFC_BENCH_BATCH=4096 SFC_BENCH_BLOCKS=100 make bench</code>
-completed successfully. Raw results: <a href="tps-latest.jsonl">tps-latest.jsonl</a>.
+completed successfully.
 The workload is 409,600 native transfers, 100 blocks, three live accounts, and
 18 Rayon workers. Signing is outside the timer. This is one local release-mode run.</p>
 <div class="table-scroll"><table>
@@ -729,8 +725,7 @@ other resource limits; that is not a measured sustained network result.</p>
 <h2 id="rayon-comparison">Rayon comparison</h2><p>After adding Rayon, the same-process release comparison used 100 blocks per case
 and the default 18-worker pool. The pool was warmed before timing. Both admission
 paths include signature verification, ordered EVM execution and RocksDB/JSONL fsync;
-networking and scheduler waits remain excluded. Transaction signing is outside the timer.
-Raw results: <a href="rayon-benchmark-results.jsonl">rayon-benchmark-results.jsonl</a>.</p>
+networking and scheduler waits remain excluded. Transaction signing is outside the timer.</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>

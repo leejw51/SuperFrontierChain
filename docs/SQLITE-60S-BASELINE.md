@@ -52,8 +52,7 @@ synced chain WAL. Record retained error causes and measure the coordinated
 candidate against this 60-second baseline. The earlier five-round improvements
 are insufficient evidence of sustained performance.
 
-Evidence: `sqlite-v5-60s-2026-10-24.csv`,
-`sqlite-v5-60s-status-2026-10-24.jsonl`, and
+Evidence: `sqlite-v5-60s-2026-10-24.csv` and
 `sqlite-v5-60s-summary-2026-10-24.json`.
 
 ## Coordinated checkpoint candidate
@@ -97,8 +96,7 @@ after successful replay even though the active error file is removed. Clippy,
 formatting and release build passed. The change is retained for reduced WAL
 growth and improved late-run behavior, not as proof of the throughput goal.
 
-Evidence: `checkpoint-gate-60s-2026-10-24.csv`,
-`checkpoint-gate-60s-status-2026-10-24.jsonl`, and
+Evidence: `checkpoint-gate-60s-2026-10-24.csv` and
 `checkpoint-gate-60s-summary-2026-10-24.json`.
 
 ## Pruning-boundary recovery guard (after these measurements)

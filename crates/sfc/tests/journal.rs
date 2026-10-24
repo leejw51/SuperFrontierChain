@@ -29,7 +29,9 @@ impl Drop for KillOnDrop {
 fn journal_crash_worker() {
     let home = PathBuf::from(std::env::var_os("SFC_JOURNAL_TEST_HOME").expect("test home"));
     let genesis = genesis();
-    let store = Store::open(&home.join("chain"), Retention::default(), &genesis).unwrap();
+    let store = std::sync::Arc::new(
+        Store::open(&home.join("chain"), Retention::default(), &genesis).unwrap(),
+    );
     let count: u64 = std::env::var("SFC_JOURNAL_BLOCK_COUNT")
         .unwrap_or_else(|_| "1".into())
         .parse()
@@ -58,6 +60,17 @@ fn journal_crash_worker() {
             store.maintain().unwrap();
         }
     }
+    let _pruner = if std::env::var_os("SFC_JOURNAL_BACKGROUND").is_some() {
+        let worker = store.start_pruner().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while store.earliest_height().unwrap() == 0 {
+            assert!(Instant::now() < deadline, "pruner did not start");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Some(worker)
+    } else {
+        None
+    };
     // Deliberately leave both databases open for the parent's SIGKILL.
     let mut signer =
         DurableSigner::open(&home.join("signer"), 7777, SigningKey::from_bytes(&[7; 32])).unwrap();
@@ -84,7 +97,7 @@ fn crash_after_acknowledged_writes(home: &Path) -> (Block, World, Vote) {
 }
 
 fn crash_after_writes(home: &Path, maintain: bool) -> (Block, World, Vote) {
-    crash_after_batches(home, maintain, 1, 1, Duration::from_secs(30))
+    crash_after_batches(home, maintain, 1, 1, Duration::from_secs(30), false)
 }
 
 fn crash_after_batches(
@@ -93,8 +106,14 @@ fn crash_after_batches(
     count: u64,
     batch: u64,
     ready_timeout: Duration,
+    background: bool,
 ) -> (Block, World, Vote) {
     let mut command = Command::new(std::env::current_exe().unwrap());
+    if background {
+        command.env("SFC_JOURNAL_BACKGROUND", "1");
+    } else {
+        command.env_remove("SFC_JOURNAL_BACKGROUND");
+    }
     if maintain {
         command.env("SFC_JOURNAL_MAINTAIN", "1");
     } else {
@@ -153,7 +172,7 @@ fn entire_unsynced_history_recovers_after_many_acknowledged_blocks() {
     // 30-second setup budget. Keep the full >8 MiB recovery workload in CI and
     // allow slower builders time to acknowledge it before the intentional crash.
     let (head, world, _) =
-        crash_after_batches(home.path(), true, 32, 1024, Duration::from_secs(180));
+        crash_after_batches(home.path(), true, 32, 1024, Duration::from_secs(180), false);
     let history = home.path().join("chain/history");
     let paths: Vec<_> = fs::read_dir(&history)
         .unwrap()
@@ -287,4 +306,20 @@ fn corrupted_journals_fail_closed_for_state_and_signer() {
         SigningKey::from_bytes(&[7; 32])
     )
     .is_err());
+}
+
+#[test]
+fn background_deletion_recovers_after_process_kill() {
+    let home = tempfile::tempdir().unwrap();
+    let (head, world, _) =
+        crash_after_batches(home.path(), false, 128, 1, Duration::from_secs(30), true);
+    let store = Store::open(&home.path().join("chain"), Retention::default(), &genesis()).unwrap();
+    assert_eq!(store.head().unwrap(), head);
+    assert_eq!(store.world().unwrap(), world);
+    assert_eq!(store.earliest_height().unwrap(), 68);
+    assert!(store.receipt_block(&transfer(0).hash).unwrap().is_none());
+    assert_eq!(
+        store.receipt_block(&transfer(127).hash).unwrap(),
+        Some(head)
+    );
 }

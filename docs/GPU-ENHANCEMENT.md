@@ -117,6 +117,4 @@ Use `--rpc-batch 4096 --transactions 65536 --repeat 3` for the large-batch compa
 Raw reports include timings, validation and source/executable hashes:
 
 - [Recovery latency and correctness](gpu-enhancement-latency-2026-10-20.json)
-- [Small-batch network TPS and CPU](gpu-enhancement-small-network-2026-10-20.jsonl)
-- [Large-batch network TPS and CPU](gpu-enhancement-large-network-2026-10-20.jsonl)
 - [Emergency tests](gpu-enhancement-emergencies-2026-10-20.json)

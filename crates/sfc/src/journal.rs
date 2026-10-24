@@ -18,3 +18,10 @@ pub(crate) fn durable_write_options() -> WriteOptions {
     options.set_sync(true);
     options
 }
+
+/// Range scans must cross hash-memtable prefixes, including short metadata keys.
+pub(crate) fn full_scan_options() -> rocksdb::ReadOptions {
+    let mut options = rocksdb::ReadOptions::default();
+    options.set_total_order_seek(true);
+    options
+}

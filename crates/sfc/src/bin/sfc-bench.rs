@@ -83,6 +83,9 @@ struct Options {
     inflight: usize,
     #[arg(long, default_value_t = 10)]
     interval: u64,
+    /// Block history window; persistent stress runs default to 5 seconds.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    retention_seconds: Option<u64>,
     #[arg(long, default_value_t = 1)]
     nodes: usize,
     #[arg(long, default_value_t = 3)]
@@ -99,6 +102,11 @@ struct Options {
     transport: Transport,
     #[arg(long, value_enum, default_value = "on")]
     sqlite: Sqlite,
+    /// Run synchronous SQLite indexing in the block path for latency diagnosis.
+    #[arg(long)]
+    sqlite_direct: bool,
+    #[arg(long, default_value_t = 1024)]
+    sqlite_direct_batch_blocks: usize,
 }
 struct Lock {
     _file: File,
@@ -288,6 +296,9 @@ impl Network {
             }
             config.rpc_listen.set_ip(options.rpc_bind);
             config.block_interval_ms = options.interval;
+            if let Some(seconds) = options.retention_seconds {
+                config.retention = sfc::config::Retention::Pruned { seconds };
+            }
             config.verification.backend = options.backend;
             config.verification.gpu_runtime = options.gpu_runtime;
             if config.capnp_listen.is_none() {
@@ -312,6 +323,11 @@ impl Network {
                 });
             if !sqlite {
                 command.arg("--no-indexer");
+            } else if options.sqlite_direct {
+                command
+                    .arg("--sqlite-direct")
+                    .arg("--sqlite-direct-batch-blocks")
+                    .arg(options.sqlite_direct_batch_blocks.to_string());
             }
             let child = command
                 .stdout(Stdio::from(log.try_clone()?))
@@ -797,10 +813,11 @@ fn measure(
         "nodes":network.nodes.len(),"sync_transport":options.sync_transport,"cpu_usage":usage,"total_cpu_seconds":cpu,
         "total_cpu_percent_one_core_100":100.0*cpu/seconds,"cpu_ms_per_committed_transaction":1000.0*cpu/count as f64,
         "cpu_method":"sysinfo cumulative process CPU milliseconds, all Rust node threads; excludes Rust load generator",
-        "rpc_batch":options.rpc_batch,"inflight":options.inflight,"block_interval_ms":options.interval,"seconds":seconds,
+        "rpc_batch":options.rpc_batch,"inflight":options.inflight,"block_interval_ms":options.interval,
+        "retention":network.nodes[0].config.retention,"seconds":seconds,
         "admission_seconds":admission_seconds,"admission_attempts":attempts,"tps":count as f64/seconds,
         "signature_verification_included":true,"network_included":true,"follower_replay_included":network.nodes.len()>1,
-        "sqlite_indexer":sqlite,"rayon_threads":rayon::current_num_threads(),
+        "sqlite_indexer":sqlite,"sqlite_write_mode":if !sqlite { "off" } else if options.sqlite_direct { "direct" } else { "background" },"rayon_threads":rayon::current_num_threads(),
         "timestamp":SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64()}),
     )
 }
@@ -940,6 +957,7 @@ fn print_info(
         "Main RocksDB":data.join("rocksdb"),"RocksDB WAL folder":data.join("rocksdb"),
         "RocksDB diagnostics":data.join("rocksdb/LOG"),"History":data.join("history"),
         "SQLite indexing":if sqlite {"on"}else{"off"},"SQLite index (WAL)":data.join("index.sqlite"),
+        "Block retention":node.config.retention,
         "SQLite WAL":data.join("index.sqlite-wal"),"SQLite shared memory":data.join("index.sqlite-shm"),
         "Structured node log":data.join("logs/node.capnp"),"Indexer error log":data.join("index-error.log"),
         "Node log":home.join("node-0/node.log"),"Stress log":home.join("stress.log"),
@@ -976,10 +994,17 @@ fn print_info(
         println!("  {key}: {value}");
         writeln!(log, "{key}: {value}")?;
     }
+    let previous = data.join("stress-tps.capnp");
+    if previous.exists() {
+        fs::remove_file(previous)?;
+    }
     fs::write(data.join("stress-info.capnp"), codec::to_vec(&info)?)?;
     Ok(())
 }
-fn execute(options: Options, continuous: bool) -> Result<()> {
+fn execute(mut options: Options, continuous: bool) -> Result<()> {
+    if continuous {
+        options.retention_seconds.get_or_insert(5);
+    }
     ensure!(
         (1..=1048576).contains(&options.transactions) && (1..=4096).contains(&options.rpc_batch),
         "invalid batch size"
@@ -1045,6 +1070,14 @@ fn execute(options: Options, continuous: bool) -> Result<()> {
             trial += 1;
             result["trial"] = trial.into();
             report(&output, &result)?;
+            // Publish the exact completed-round measurement outside the timed workload.
+            let node = &network.nodes[0];
+            let snapshot = json!({"nodePid":node.child.id(),"trial":trial,
+                "tps":result["tps"],"transactions":result["transactions"],
+                "seconds":result["seconds"],"timestamp":result["timestamp"]});
+            let temporary = node.config.data_dir.join("stress-tps.tmp");
+            fs::write(&temporary, codec::to_vec(&snapshot)?)?;
+            fs::rename(temporary, node.config.data_dir.join("stress-tps.capnp"))?;
             let mut log = OpenOptions::new()
                 .create(true)
                 .append(true)

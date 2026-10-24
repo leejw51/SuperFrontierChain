@@ -1,0 +1,49 @@
+{
+  "rounds": 20,
+  "transactions": 20971520,
+  "measured_seconds": 247.608981958,
+  "aggregate_tps": 84696.11980213723,
+  "last5_tps": 62036.41891930425,
+  "minimum_tps": 55459.186422950734,
+  "first_tps": 159010.43687206757,
+  "last_tps": 55459.186422950734,
+  "meta": {
+    "height": 7491,
+    "log_offset": 4195936,
+    "logs": 7492,
+    "transactions": 20971521,
+    "skipped_blocks": 0
+  },
+  "rows": 20971521,
+  "integrity": [
+    [
+      "ok"
+    ]
+  ],
+  "sqlite-write-profile.json": {
+    "batches": 7491,
+    "blocks": 7491,
+    "transactions": 20971521,
+    "input_bytes": 6711574752,
+    "commits": 107,
+    "prepare_us": 14516452,
+    "insert_us": 84657136,
+    "commit_us": 33719550,
+    "max_commit_us": 584657,
+    "rocksdb_commit_us": 13196729,
+    "errors": 0,
+    "checkpoint_fallbacks": 0,
+    "checkpoint_wait_us": 65466660,
+    "last_error": null
+  },
+  "sqlite-checkpoint-profile.json": {
+    "checkpoints": 324,
+    "checkpoint_us": 195573116,
+    "max_checkpoint_us": 8296787,
+    "peak_wal_bytes": 1849064272,
+    "wal_frames": 122438,
+    "checkpointed_frames": 122438,
+    "restart_attempts": 42,
+    "busy_restarts": 0
+  }
+}

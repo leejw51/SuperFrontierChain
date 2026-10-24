@@ -44,6 +44,11 @@ enum Command {
         /// Disable the rebuildable SQLite explorer/log index; RocksDB commits remain enabled.
         #[arg(long)]
         no_indexer: bool,
+        /// Write the SQLite batch directly from block production/import; records phase timings.
+        #[arg(long, conflicts_with = "no_indexer")]
+        sqlite_direct: bool,
+        #[arg(long, default_value_t = 1024)]
+        sqlite_direct_batch_blocks: usize,
     },
     /// Query a peer through Cap'n Proto RPC.
     PeerStatus {
@@ -120,6 +125,8 @@ async fn run(
     backend: Option<sfc::verification::Backend>,
     gpu_runtime: Option<sfc::verification::GpuRuntime>,
     no_indexer: bool,
+    sqlite_direct: bool,
+    sqlite_direct_batch_blocks: usize,
 ) -> Result<()> {
     let path = if path.exists() {
         fs::canonicalize(path)?
@@ -185,10 +192,21 @@ async fn run(
             "gpuPython":null,
             "gpuWorker":null,
             "tlsKeyLocation":config.tls_key,
-            "sqliteIndexerEnabled":!no_indexer
+            "sqliteIndexerEnabled":!no_indexer,
+            "sqliteWriteMode":if no_indexer { "off" } else if sqlite_direct { "direct" } else { "background" }
         }))?,
     )?;
+    let mut pruner = node
+        .lock()
+        .map_err(|_| anyhow::anyhow!("node lock poisoned"))?
+        .store
+        .start_pruner()?;
     let _indexer = if no_indexer {
+        None
+    } else if sqlite_direct {
+        node.lock()
+            .map_err(|_| anyhow::anyhow!("node lock poisoned"))?
+            .enable_direct_indexer(sqlite_direct_batch_blocks)?;
         None
     } else {
         Some(sfc::indexer::Indexer::start(
@@ -241,6 +259,7 @@ async fn run(
             }
         } => result?,
         result = producer => result?,
+        result = pruner.failed() => result?,
         result = tokio::signal::ctrl_c() => {result?; sfc::logging::event("info", "node_stopping", serde_json::json!({"reason":"interrupt"}));},
     }
     Ok(())
@@ -261,7 +280,19 @@ async fn main() {
                     verification_backend,
                     gpu_runtime,
                     no_indexer,
-                } => run(config, verification_backend, gpu_runtime, no_indexer).await,
+                    sqlite_direct,
+                    sqlite_direct_batch_blocks,
+                } => {
+                    run(
+                        config,
+                        verification_backend,
+                        gpu_runtime,
+                        no_indexer,
+                        sqlite_direct,
+                        sqlite_direct_batch_blocks,
+                    )
+                    .await
+                }
                 Command::PeerStatus {
                     transport,
                     address,

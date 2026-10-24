@@ -230,7 +230,8 @@ See [architecture](docs/ARCHITECTURE.md) and [implementation plan](docs/PLAN.md)
 | `make test-two-nodes` / `make test-emergencies` | Signed-transaction recovery and 15 fault scenarios |
 | `make bench` | Release-mode execution, durable-write and admission measurements |
 | `make benchmark` / `make bench-network` | Rust-supervised one/two-node binary RPC admission and durable replay |
-| `make stresstest` | One release node with GPU verification: committed TPS and CPU usage |
+| `make stresstest` | One release node with GPU verification, SQLite OFF: committed TPS and CPU usage |
+| `make stresstest2` | Same workload with SQLite ON, direct writes and latency profiling |
 | `make stressstart` | Start the same stress workload in the background under Python supervision |
 | `make stop` | Stop all blockchain processes belonging to this repository, preserving data |
 | `make test-stresstest` | GPU routing, TPS/CPU accounting, durable transaction counts and crash/restart checks |
@@ -241,7 +242,29 @@ See [architecture](docs/ARCHITECTURE.md) and [implementation plan](docs/PLAN.md)
 | `make clean` | Remove build output; preserves chain data |
 
 `make stresstest` builds release and continuously
-runs one node with native MLX GPU verification and SQLite indexing enabled. Each
+runs one node with native MLX GPU verification and SQLite indexing disabled.
+Stress runs (`stresstest`, `stresstest2`, `stressstart`, and `sfc-bench run`) keep
+only a **5-second block history window**, including when reusing an existing stress
+home. Override with `STRESS_RETENTION_SECONDS` or `--retention-seconds`.
+Expired blocks are removed by the background retention worker; the boundary block,
+current head and chain state remain. SQLite rows are never pruned. Ordinary node
+and comparison-benchmark retention defaults remain unchanged. Physical disk
+reclamation can lag while RocksDB compaction runs.
+`make stresstest2` runs the same workload with SQLite indexing enabled and writes
+its SQLite rows directly from block production. Direct INSERTs share a transaction
+until 1,024 blocks, approximately 512 MiB, or 8 seconds has elapsed. These thresholds are
+checked after each block, including empty blocks; clean shutdown also flushes.
+The 8-second threshold is not an independent timer or a hard latency bound.
+Before a produced or imported block advances the pruning cutoff past an
+uncommitted SQLite source block, direct mode catches up and commits that batch.
+If catch-up fails, it refuses that chain advance so the source remains available
+for retry. This also handles timestamp jumps with short retention windows.
+`STRESS_SQLITE_BATCH_BLOCKS=1` reproduces per-block COMMIT.
+`STRESS_SQLITE_DIRECT=0` selects
+the asynchronous background writer for comparison. Direct mode waits for SQLite
+and records preparation, INSERT, COMMIT/checkpoint and RocksDB commit times in
+`node-0/data/sqlite-write-profile.json`; index errors remain visible separately.
+Each
 round contains 1,048,576 signed transfers with 4,096 transactions per binary RPC batch and a
 10 ms block interval with 12 Rayon workers (tuned on the development Apple Silicon
 host). Override with `STRESS_INTERVAL=100` for the earlier cadence or
@@ -270,9 +293,11 @@ see [Merkle validation](docs/MERKLE-TRIE.md). Throughput varies with chain size,
 indexing backlog, storage and thermal conditions. The previous `.sfc-stress-v3`
 chain is preserved and cannot be continued with the changed state-root rules.
 
-SQLite indexing is on by default. Use `make stresstest STRESS_SQLITE=off` to
-exclude the explorer/log index, or `sfc run --config ... --no-indexer` for a node
-started directly. This skips the SQLite writer entirely and preserves any existing
+SQLite indexing is off by default for `make stresstest` and `make stressstart`;
+use `make stresstest2` to include the explorer/log index. `STRESS_SQLITE=on|off`
+can explicitly override either target. Nodes started directly retain SQLite ON
+unless passed `sfc run --config ... --no-indexer`.
+Disabling indexing skips the SQLite writer entirely and preserves any existing
 index files. RocksDB synchronous commits, structured logs, Ethereum RPC and GPU
 verification continue normally. Explorer/log searches are unavailable while off;
 the dashboard runtime metadata reports `sqliteIndexerEnabled: false`. Starting
@@ -288,7 +313,10 @@ index searches.
 ```sh
 make stresstest
 make stop
+make stresstest2
+make stop
 make stresstest STRESS_TRANSACTIONS=16384 STRESS_BATCH=1024
+# STRESS_ROUNDS=50 stops after 50 rounds; the default 0 runs continuously.
 # Also configurable: STRESS_INTERVAL=100 (ms), STRESS_DIR=~/.superfrontierchain/stress,
 # STRESS_REPORT=~/.superfrontierchain/stress/results.capnp
 # make stop discovers repository processes even when STRESS_DIR was overridden.
@@ -299,7 +327,7 @@ CPU/GPU recovery counters, Rayon workers, live RocksDB properties, and persisten
 paths. Hardware GPU utilization is explicitly unavailable; recovery counts are
 not GPU utilization percentages.
 
-Each running node includes a background SQLite indexer at `data/index.sqlite`,
+By default, a running node includes a background SQLite indexer at `data/index.sqlite`,
 using **WAL mode**, `synchronous=NORMAL`, and independent read connections. It indexes
 structured Cap’n Proto events with FTS5 prefix search, block metadata, signed transactions,
 and receipts. The dashboard queries `/dashboard/index?kind=logs&q=block_produced`;
@@ -313,17 +341,47 @@ Structured logs remain at `data/logs/node.capnp`; supervisor-captured node/GPU o
 is at `node-0/node.log`. SQLite checkpoints automatically and resumes from
 transactional block/log cursors after restart. With NORMAL synchronization, an
 OS/power failure may lose recent index commits; retained RocksDB blocks and Cap’n Proto
-records are replayed. The index and logs retain history independently of chain
-pruning and consume disk as the stress test continues. To rebuild the index,
+records are replayed. SQLite block, transaction, receipt and log rows are append-only: chain pruning
+does not delete them. Indexed history and raw logs consume disk as the stress
+test continues. To rebuild the index,
 stop the node and remove only `index.sqlite` and its `-wal`/`-shm` sidecars;
 already-pruned blocks cannot be rebuilt from the live block store.
 
+In background mode, block commit sends a nonblocking, coalesced notification to the SQLite worker;
+it never waits for SQLite completion. The queue holds one wake-up, not block
+payloads. The durable height cursor drives catch-up, with a 100 ms fallback for
+log-only updates. There is no unbounded in-memory backlog. If the writer falls
+behind RocksDB retention, unindexed expired blocks can still be skipped; the
+`skippedPrunedBlocks` counter exposes this limitation.
+
 Catch-up commits up to 16 blocks or approximately 8 MiB per transaction (a single
-block is never split). Blocks and the pruning boundary are read from one RocksDB
-snapshot without holding the execution mutex. Rows and cursors roll back together on failure.
-Automatic WAL checkpoints run at 4,096 pages, approximately 16 MiB with default
-SQLite pages. This is a checkpoint trigger, not a hard size limit: long-lived
-readers can delay reclamation. History projection sync runs on segment close and
+block is never split). A dedicated two-thread Rayon pool prepares owned rows
+before the single SQLite writer opens its transaction. Prepared rows temporarily
+add memory proportional to this bounded batch; SQL connections are never shared
+with Rayon workers. Blocks and the pruning boundary are read from one RocksDB
+snapshot without holding the execution mutex. Rows and cursors roll back together on failure. The height and transaction count
+are updated once per batch; the writer does not scan or delete expired SQLite rows.
+The direct writer page cache targets 2 GiB; background indexing retains a 256 MiB
+target. These are cache targets, not process memory limits. Temporary statement rollback journals use
+memory (`temp_store=MEMORY`), avoiding temporary-file writes during triggered
+INSERTs while retaining statement rollback and database WAL commits. Temporary
+pages add memory beyond the page-cache target. In background mode, automatic WAL checkpoints
+run at 65,536 pages, approximately 256 MiB with default SQLite pages. Direct mode
+keeps INSERT/COMMIT on the producer and uses a separate connection/thread for
+PASSIVE checkpoints, checking the WAL file every 250 ms once it reaches 256 MiB.
+At roughly 512 MiB of active WAL frames it requests a RESTART window after the
+current direct batch commits. The next BEGIN waits for that attempt to finish,
+preventing continuous local writes from starving WAL recycling. SQLite's lock
+waiting is limited to 250 ms per attempt; waiting for the current batch and
+checkpoint I/O can take longer. Long-lived readers can still return busy.
+`sqlite-write-profile.json` separates this wait as `checkpoint_wait_us` and
+retains `last_error` after recovery, while the active error file clears on retry.
+`sqlite-checkpoint-profile.json` records checkpoint timing and sampled peak WAL
+size. An exited worker restores automatic checkpoints at the next flush;
+`checkpoint-error.log` records checkpoint errors. Shutdown joins the worker before
+the final checkpoint. Bundled SQLite 3.51.3 fixes the concurrent WAL-reset race.
+Neither trigger is a hard WAL size limit: long-lived readers or sustained writes
+can delay reclamation. History projection sync runs on segment close and
 clean shutdown; the authoritative RocksDB WAL still syncs every block.
 
 Performance measurements and limits are in [PERFORMANCE.md](docs/PERFORMANCE.md).
@@ -380,10 +438,11 @@ contract storage, and recent EVM block hashes are preserved. Pruned history retu
 `null` through block/receipt lookup. A lagging follower must use an archive peer if
 its required history has expired.
 
-Deletion uses synchronous RocksDB WAL batches capped at 256 blocks or roughly 8 MiB
-of delete operations (checked after each block). Each batch atomically removes
-blocks and their indexes, and restart resumes any unfinished backlog. RocksDB
-compaction reclaims disk space asynchronously. Cap’n Proto files rotate every min(retention seconds, 60) seconds in pruned mode: complete
+The retention worker uses synchronous RocksDB WAL batches capped at 4 blocks or
+roughly 1 MiB of delete operations (checked after each block). Each batch atomically removes
+expired blocks and advances the retention floor; restart resumes unfinished work.
+Receipt lookup requires a retained block, while compaction asynchronously reclaims
+receipt indexes below the durable floor. Cap’n Proto files rotate every min(retention seconds, 60) seconds in pruned mode: complete
 expired segments are deleted, so the boundary segment can retain less than one extra
 segment until rotation; restart rebuilds it from retained database records.
 
@@ -546,9 +605,29 @@ supported; zero and duplicate fields are rejected. Archive mode remains
 a JSONL companion is written without deleting the original. Genesis, database
 records, internal RPC and network payloads remain Cap’n Proto.
 
-SQLite removes expired block/transaction/receipt rows following RocksDB's earliest
-retained height and expires indexed logs by wall-clock age. WAL and freed SQLite
-pages are reused; database files do not necessarily shrink immediately. Current
-state is never pruned. Raw diagnostic logs and benchmark reports are separate
+SQLite retains all indexed block/transaction/receipt/log rows without pruning.
+Its database can grow beyond the RocksDB history window; an asynchronous writer
+can still miss source blocks that expire before indexing. Current chain state
+is never pruned. Raw diagnostic logs and benchmark reports are separate
 from chain-history retention. A 60-second window is not a disk-space quota, and
 followers offline longer than the available history cannot replay from this node.
+
+### Reset local chain data
+
+`make clear` (also available as `make clearall`) stops repository nodes and deletes
+all default chain homes: `~/.superfrontierchain/{node,stress,testnet}` and
+repository-local `.sfc*` archives. This removes RocksDB, SQLite, WALs, history,
+and the homes' configuration/certificates; the next start initializes a new chain.
+`PERSIST_DIR=...` selects a different persistence root. Unrelated custom homes,
+symlink homes, supervisor locks, and build artifacts are preserved.
+`make clean` only removes build artifacts.
+
+### Background retention
+
+Server processes perform expiry on a dedicated thread in small batches, outside
+transaction admission's node lock. Physical deletion can lag during load; check
+`retention_completed_cutoff` and `retention_worker_active` in dashboard storage
+statistics. Block commits and deletion batches still use the synced RocksDB WAL.
+Shutdown joins the worker, and a cleanup failure stops the server. Startup resumes
+outstanding cleanup. See [measured results](docs/PERFORMANCE.md#dedicated-bounded-retention-worker-2026-10-24)
+for the remaining sustained-throughput limitation.

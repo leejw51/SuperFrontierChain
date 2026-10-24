@@ -163,17 +163,38 @@ fn flat_hash_chain_is_rejected_without_rewriting_history() {
     }
     let block;
     {
-        let db = rocksdb::DB::open_default(dir.path().join("rocksdb")).unwrap();
-        block = db.get(b"block/00000000000000000000").unwrap().unwrap();
+        let db = rocksdb::DB::open_cf(
+            &rocksdb::Options::default(),
+            dir.path().join("rocksdb"),
+            ["default", "blocks"],
+        )
+        .unwrap();
+        block = db
+            .get_cf(
+                db.cf_handle("blocks").unwrap(),
+                b"block/00000000000000000000",
+            )
+            .unwrap()
+            .unwrap();
         db.delete(b"meta/state_commitment").unwrap();
     }
     let error = Store::open(dir.path(), Retention::Archive, &genesis)
         .err()
         .unwrap();
     assert!(error.to_string().contains("incompatible state commitment"));
-    let db = rocksdb::DB::open_default(dir.path().join("rocksdb")).unwrap();
+    let db = rocksdb::DB::open_cf(
+        &rocksdb::Options::default(),
+        dir.path().join("rocksdb"),
+        ["default", "blocks"],
+    )
+    .unwrap();
     assert_eq!(
-        db.get(b"block/00000000000000000000").unwrap().unwrap(),
+        db.get_cf(
+            db.cf_handle("blocks").unwrap(),
+            b"block/00000000000000000000"
+        )
+        .unwrap()
+        .unwrap(),
         block
     );
     assert!(db.get(b"meta/state_commitment").unwrap().is_none());

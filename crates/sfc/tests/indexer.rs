@@ -53,6 +53,39 @@ fn indexer_catches_up_while_execution_mutex_is_held() {
 }
 
 #[test]
+fn sqlite_write_lock_does_not_block_commit_and_notifications_coalesce() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let node = Arc::new(Mutex::new(
+        Node::open(config, Application::default()).unwrap(),
+    ));
+    let index = Indexer::start(node.clone(), data.clone()).unwrap();
+    wait(|| query(&data, "blocks", "")["indexedHeight"] == 0);
+    let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let producer = node.clone();
+    let (sent, received) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let mut node = producer.lock().unwrap();
+        for nonce in 0..40 {
+            node.submit(&common::transfer(nonce).raw).unwrap();
+            node.produce(1_000_002 + nonce).unwrap();
+        }
+        sent.send(()).unwrap();
+    });
+    let result = received.recv_timeout(Duration::from_secs(2));
+    db.execute_batch("ROLLBACK").unwrap();
+    thread.join().unwrap();
+    result.expect("block commits waited for SQLite to release its write lock");
+    wait(|| query(&data, "blocks", "")["indexedHeight"] == 40);
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 40);
+    drop(index);
+    let _restarted = Indexer::start(node, data.clone()).unwrap();
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 40);
+}
+
+#[test]
 fn catchup_batches_roll_back_rows_and_cursors_together_and_resume() {
     let dir = tempfile::tempdir().unwrap();
     let config = common::config(dir.path());
@@ -126,12 +159,8 @@ fn wal_search_restart_and_concurrent_reader_preserve_exact_records() {
         .append(true)
         .open(data.join("logs/node.capnp"))
         .unwrap();
-    // These records test replay, not expiration. Ancient timestamps made the
-    // assertions race the indexer's once-per-second retention cleanup.
-    let log_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
+    // Ancient indexed logs remain available independently of chain retention.
+    let log_time = 1u64;
     sfc::codec::write_record(&mut log, &sfc::codec::to_vec(&json!({"timestamp_ms":log_time,"level":"info","event":"recovery_complete","fields":{"message":"worker healthy <script>"}})).unwrap()).unwrap();
     let tx = common::transfer(0);
     let hash = hex_hash(&tx.hash);
@@ -293,10 +322,45 @@ fn explorer_preserves_empty_blocks_and_pages_transactions_without_gaps() {
         next = page["next"].clone();
     }
     assert_eq!(positions, vec![(2, 0), (1, 1), (1, 0)]);
+    // Address indexes may store ascending keys, but both sender and recipient
+    // searches must still page newest-first without gaps across block boundaries.
+    for address in [
+        format!("{:#x}", common::sender()),
+        format!("0x{}", "22".repeat(20)),
+    ] {
+        let mut cursor = Value::Null;
+        let mut positions = Vec::new();
+        loop {
+            let page = indexer::search(
+                &data,
+                &Query {
+                    kind: "transactions".into(),
+                    q: address.clone(),
+                    limit: Some(1),
+                    before_height: cursor["before_height"].as_u64(),
+                    before_position: cursor["before_position"].as_u64().map(|n| n as u32),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for row in page["rows"].as_array().unwrap() {
+                positions.push((
+                    row["height"].as_u64().unwrap(),
+                    row["position"].as_u64().unwrap(),
+                ));
+            }
+            cursor = page["next"].clone();
+            if cursor.is_null() {
+                break;
+            }
+            assert!(positions.len() <= 4, "address cursor repeated rows");
+        }
+        assert_eq!(positions, vec![(4, 0), (2, 0), (1, 1), (1, 0)]);
+    }
 }
 
 #[test]
-fn short_retention_removes_indexed_transactions_and_receipts() {
+fn chain_pruning_preserves_sqlite_transactions_receipts_and_logs_after_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = common::config(dir.path());
     config.retention = sfc::config::Retention::Pruned { seconds: 2 };
@@ -304,7 +368,17 @@ fn short_retention_removes_indexed_transactions_and_receipts() {
     let node = Arc::new(Mutex::new(
         Node::open(config, Application::default()).unwrap(),
     ));
-    let _index = Indexer::start(node.clone(), data.clone()).unwrap();
+    std::fs::create_dir_all(data.join("logs")).unwrap();
+    let mut log = std::fs::File::create(data.join("logs/node.capnp")).unwrap();
+    sfc::codec::write_record(
+        &mut log,
+        &sfc::codec::to_vec(&json!({
+            "timestamp_ms": 1, "level": "info", "event": "ancient", "fields": {}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let index = Indexer::start(node.clone(), data.clone()).unwrap();
     {
         let mut n = node.lock().unwrap();
         n.submit(&common::transfer(0).raw).unwrap();
@@ -316,25 +390,338 @@ fn short_retention_removes_indexed_transactions_and_receipts() {
         n.produce(1_000_004).unwrap();
         n.store.maintain().unwrap();
     }
-    wait(|| {
-        query(&data, "blocks", "")["indexedHeight"] == 2
-            && query(&data, "transactions", "")["indexedTransactions"] == 0
-    });
+    wait(|| query(&data, "blocks", "")["indexedHeight"] == 2);
+    assert!(node.lock().unwrap().store.block(1).unwrap().is_none());
+    let hash = hex_hash(&common::transfer(0).hash);
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    assert_eq!(query(&data, "receipts", &hash)["rows"][0]["hash"], hash);
+    assert_eq!(query(&data, "logs", "ancient")["indexedLogs"], 1);
+    drop(index);
+    drop(node);
+    let mut config = common::config(dir.path());
+    config.retention = sfc::config::Retention::Pruned { seconds: 2 };
+    let node = Arc::new(Mutex::new(
+        Node::open(config, Application::default()).unwrap(),
+    ));
+    let _index = Indexer::start(node.clone(), data.clone()).unwrap();
+    node.lock().unwrap().produce(1_000_010).unwrap();
+    wait(|| query(&data, "blocks", "")["indexedHeight"] == 3);
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    assert_eq!(query(&data, "receipts", &hash)["rows"][0]["hash"], hash);
+    assert_eq!(query(&data, "logs", "ancient")["indexedLogs"], 1);
     let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
     assert_eq!(
         db.query_row("SELECT count(*) FROM transactions", [], |r| r
             .get::<_, u64>(0))
             .unwrap(),
-        0
+        1
     );
     assert_eq!(
         db.query_row("SELECT min(height) FROM blocks", [], |r| r.get::<_, u64>(0))
             .unwrap(),
-        2
+        0
+    );
+    assert_eq!(
+        db.query_row("PRAGMA journal_mode", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "wal"
     );
     assert_eq!(
         db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
             .unwrap(),
         "ok"
     );
+}
+
+#[test]
+fn direct_sqlite_writes_before_return_and_retries_without_undoing_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = common::config(dir.path());
+    config.retention = sfc::config::Retention::Pruned { seconds: 2 };
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config.clone(), Application::default()).unwrap();
+    node.enable_direct_indexer(1).unwrap();
+    node.submit(&common::transfer(0).raw).unwrap();
+    node.produce(1_000_001).unwrap();
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    assert_eq!(query(&data, "blocks", "")["indexedHeight"], 1);
+    let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_direct BEFORE INSERT ON blocks WHEN NEW.height=2 BEGIN SELECT RAISE(ABORT, 'injected direct failure'); END;").unwrap();
+    node.submit(&common::transfer(1).raw).unwrap();
+    let committed = node.produce(1_000_002).unwrap();
+    assert_eq!(committed.height(), 2);
+    assert_eq!(node.store.head().unwrap(), committed);
+    assert!(data.join("index-error.log").exists());
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    db.execute_batch("DROP TRIGGER fail_direct").unwrap();
+    node.produce(1_000_003).unwrap();
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 2);
+    assert!(!data.join("index-error.log").exists());
+    node.produce(1_000_010).unwrap();
+    assert!(node.store.block(1).unwrap().is_none());
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 2);
+    drop(node);
+    let metrics: Value =
+        serde_json::from_slice(&std::fs::read(data.join("sqlite-write-profile.json")).unwrap())
+            .unwrap();
+    assert_eq!(metrics["transactions"], 2);
+    assert_eq!(metrics["errors"], 1);
+    assert!(metrics["last_error"]
+        .as_str()
+        .unwrap()
+        .contains("injected direct failure"));
+    let mut reopened = Node::open(config, Application::default()).unwrap();
+    reopened.enable_direct_indexer(1).unwrap();
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 2);
+}
+
+#[test]
+fn direct_sqlite_batches_are_atomic_and_flush_on_shutdown() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config, Application::default()).unwrap();
+    node.enable_direct_indexer(16).unwrap();
+    node.submit(&common::transfer(0).raw).unwrap();
+    node.produce(1_000_001).unwrap();
+    // INSERT has executed on the node thread, but the batch is not yet published.
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 0);
+    node.flush_direct_indexer().unwrap();
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    node.submit(&common::transfer(1).raw).unwrap();
+    node.produce(1_000_002).unwrap();
+    drop(node);
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 2);
+}
+
+#[test]
+fn direct_sqlite_batch_failure_replays_all_uncommitted_blocks() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config, Application::default()).unwrap();
+    node.enable_direct_indexer(16).unwrap();
+    let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_batch BEFORE INSERT ON blocks WHEN NEW.height=2 BEGIN SELECT RAISE(ABORT, 'injected batch failure'); END;").unwrap();
+    for nonce in 0..2 {
+        node.submit(&common::transfer(nonce).raw).unwrap();
+        node.produce(1_000_001 + nonce).unwrap();
+    }
+    assert!(data.join("index-error.log").exists());
+    db.execute_batch("DROP TRIGGER fail_batch").unwrap();
+    node.produce(1_000_003).unwrap();
+    node.flush_direct_indexer().unwrap();
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 2);
+    assert_eq!(
+        db.query_row("SELECT count(DISTINCT hash) FROM transactions", [], |r| r
+            .get::<_, u64>(
+            0
+        ))
+        .unwrap(),
+        2
+    );
+    assert_eq!(query(&data, "blocks", "")["indexedHeight"], 3);
+}
+
+#[test]
+fn compact_hash_prefix_collisions_preserve_exact_search_and_uniqueness() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config, Application::default()).unwrap();
+    node.enable_direct_indexer(1).unwrap();
+    for nonce in 0..2 {
+        node.submit(&common::transfer(nonce).raw).unwrap();
+    }
+    node.produce(1_000_001).unwrap();
+    drop(node);
+    let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    let mut first = [0xaau8; 32];
+    first[31] = 1;
+    let mut second = first;
+    second[31] = 2;
+    for (position, hash) in [first, second].iter().enumerate() {
+        db.execute(
+            "UPDATE transactions SET hash=?1 WHERE position=?2",
+            rusqlite::params![hash.as_slice(), position],
+        )
+        .unwrap();
+    }
+    for hash in [first, second] {
+        let text = format!("0x{}", hex::encode(hash));
+        let found = query(&data, "transactions", &text.to_uppercase());
+        assert_eq!(found["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(found["rows"][0]["hash"], text);
+    }
+    assert!(db.execute("INSERT INTO transactions SELECT hash,height+1,position,sender,recipient,raw,receipt FROM transactions WHERE position=0", []).is_err());
+    assert!(db
+        .execute(
+            "UPDATE transactions SET hash=?1 WHERE position=1",
+            [first.as_slice()]
+        )
+        .is_err());
+    let sender = format!("{:#x}", common::sender());
+    assert_eq!(
+        query(&data, "transactions", &sender)["rows"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        query(&data, "transactions", "1")["rows"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(query(&data, "transactions", "invalid hash")["rows"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let plan = db.query_row("EXPLAIN QUERY PLAN SELECT hash FROM transactions WHERE substr(hash,1,8)=substr(?1,1,8) AND hash=?1", [first.as_slice()], |r| r.get::<_, String>(3)).unwrap();
+    assert!(plan.contains("transactions_hash_prefix"), "{plan}");
+    assert_eq!(
+        db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "ok"
+    );
+}
+
+#[test]
+fn multirow_insert_failure_rolls_back_prior_chunks_and_replays() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = common::config(dir.path());
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config, Application::default()).unwrap();
+    node.enable_direct_indexer(1).unwrap();
+    let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_chunk BEFORE INSERT ON transactions WHEN NEW.position=130 BEGIN SELECT RAISE(ABORT,'injected chunk failure'); END;").unwrap();
+    for nonce in 0..256 {
+        node.submit(&common::transfer(nonce).raw).unwrap();
+    }
+    let block = node.produce(1_000_001).unwrap();
+    assert_eq!(block.transaction_count(), 256);
+    assert!(data.join("index-error.log").exists());
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 0);
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM transactions", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    db.execute_batch("DROP TRIGGER fail_chunk").unwrap();
+    node.produce(1_000_002).unwrap();
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 256);
+    assert_eq!(
+        db.query_row("SELECT count(DISTINCT hash) FROM transactions", [], |r| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        256
+    );
+    assert_eq!(query(&data, "blocks", "")["indexedHeight"], 2);
+    assert!(!data.join("index-error.log").exists());
+}
+
+#[test]
+fn direct_batch_commits_before_source_expiry_and_blocks_pruning_on_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = common::config(dir.path());
+    config.retention = sfc::config::Retention::Pruned { seconds: 2 };
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config, Application::default()).unwrap();
+    node.enable_direct_indexer(128).unwrap();
+    node.submit(&common::transfer(0).raw).unwrap();
+    node.produce(1_000_001).unwrap();
+    node.produce(1_000_010).unwrap();
+    assert!(node.store.block(1).unwrap().is_none());
+    // Independent connection sees the expired block's row while the new block
+    // may still be in an uncommitted batch: Drop/clean shutdown is not involved.
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    node.flush_direct_indexer().unwrap();
+    let db = rusqlite::Connection::open(data.join("index.sqlite")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_expiry BEFORE INSERT ON blocks WHEN NEW.height=3 BEGIN SELECT RAISE(ABORT,'expiry retry failure'); END;").unwrap();
+    node.submit(&common::transfer(1).raw).unwrap();
+    node.produce(1_000_011).unwrap();
+    assert!(node.produce(1_000_020).is_err());
+    assert_eq!(node.store.head().unwrap().height(), 3);
+    assert!(node.store.block(3).unwrap().is_some());
+    db.execute_batch("DROP TRIGGER fail_expiry").unwrap();
+    node.produce(1_000_020).unwrap();
+    assert!(node.store.block(3).unwrap().is_none());
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 2);
+    assert_eq!(query(&data, "transactions", "")["skippedPrunedBlocks"], 0);
+}
+
+#[test]
+#[ignore = "subprocess helper exits without running destructors"]
+fn sqlite_expiry_exit_worker() {
+    let home = std::path::PathBuf::from(std::env::var_os("SFC_SQLITE_EXPIRY_HOME").unwrap());
+    let mut config = common::config(&home);
+    config.retention = sfc::config::Retention::Pruned { seconds: 2 };
+    let mut node = Node::open(config, Application::default()).unwrap();
+    node.enable_direct_indexer(128).unwrap();
+    node.submit(&common::transfer(0).raw).unwrap();
+    node.produce(1_000_001).unwrap();
+    node.produce(1_000_010).unwrap();
+    assert!(node.store.block(1).unwrap().is_none());
+    std::process::exit(0); // No DirectWriter::drop flush of the current batch.
+}
+
+#[test]
+fn sqlite_expiry_survives_process_exit_without_shutdown_flush() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "sqlite_expiry_exit_worker"])
+        .env("SFC_SQLITE_EXPIRY_HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut config = common::config(dir.path());
+    config.retention = sfc::config::Retention::Pruned { seconds: 2 };
+    let data = config.data_dir.clone();
+    let mut node = Node::open(config, Application::default()).unwrap();
+    assert!(node.store.block(1).unwrap().is_none());
+    node.enable_direct_indexer(128).unwrap();
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    assert_eq!(query(&data, "transactions", "")["skippedPrunedBlocks"], 0);
+    assert_eq!(
+        query(&data, "transactions", "")["rows"][0]["transaction"]["nonce"],
+        "0"
+    );
+}
+
+#[test]
+fn follower_commits_direct_sqlite_batch_before_source_expiry() {
+    let source_dir = tempfile::tempdir().unwrap();
+    let source_config = common::config(source_dir.path());
+    let mut source = Node::open(source_config.clone(), Application::default()).unwrap();
+    let follower_dir = tempfile::tempdir().unwrap();
+    let mut config = common::config(follower_dir.path());
+    config.retention = sfc::config::Retention::Pruned { seconds: 2 };
+    config.sync_peer = Some(sfc::config::SyncPeer {
+        transport: sfc::config::Transport::Tcp,
+        address: source_config.peer_listen,
+        certificate: source_config.tls_cert,
+        server_name: "localhost".into(),
+    });
+    let data = config.data_dir.clone();
+    let mut follower = Node::open(config, Application::default()).unwrap();
+    follower.enable_direct_indexer(128).unwrap();
+    source.submit(&common::transfer(0).raw).unwrap();
+    follower
+        .import_encoded(source.produce(1_000_001).unwrap())
+        .unwrap();
+    follower
+        .import_encoded(source.produce(1_000_010).unwrap())
+        .unwrap();
+    assert!(follower.store.block(1).unwrap().is_none());
+    assert_eq!(query(&data, "transactions", "")["indexedTransactions"], 1);
+    assert_eq!(query(&data, "transactions", "")["skippedPrunedBlocks"], 0);
 }

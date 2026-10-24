@@ -211,10 +211,14 @@ eth_getTransactionByHash, filters/subscriptions, tracing, full block transaction
 objects, historical account state and Ethereum MPT proofs. Unknown methods return
 method-not-found. Cronos-level tooling compatibility is a goal, not a completed
 conformance claim. See <a href="ETHEREUM.html">compatibility details</a>.</p>
-<h2 id="7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</h2><p><code>make stresstest</code>: release build, one sequencer, native MLX GPU, SQLite ON, Capnp TCP,
+<h2 id="7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</h2><p><code>make stresstest</code>: release build, one sequencer, native MLX GPU, SQLite OFF, Capnp TCP,
 12 Rayon workers, 4,096-entry batches, one in-flight batch, 10 ms block scheduling,
 1,048,576 transactions per round. Runs until <code>make stop</code> or Ctrl-C. Startup prints
-URLs and persistence paths. Home: <code>~/.superfrontierchain/stress</code>; old homes are preserved.</p>
+URLs and persistence paths. Home: <code>~/.superfrontierchain/stress</code>; existing homes are reused.
+Stress runs set a 5-second block retention window, including on reused homes;
+<code>STRESS_RETENTION_SECONDS</code> overrides it. <code>make stresstest2</code> enables direct SQLite
+writes with atomic batches; SQLite rows are never pruned. Ordinary node retention
+still defaults to 60 seconds.</p>
 <p>Python supervises the build and Rust runner lifecycle; no benchmark computation or
 GPU execution runs in Python. <code>make stressstart</code> starts the same workload in the
 background. Supervisor output is appended to <code>~/.superfrontierchain/supervisor/stress.log</code>. Duplicate
@@ -226,8 +230,10 @@ State directories are retained. Test with <code>make test-stress-supervisor</cod
 other repository blockchain processes are running.</p>
 <p>TPS counts committed transfers and includes signature verification, EVM execution,
 Merkle updates and durable commits. Fixture signing is outside the timed interval.
-Node CPU uses 100% per core and excludes the load generator. SQLite catches up
-asynchronously and is checked after timing. These local transfer tests are neither
+Node CPU uses 100% per core and excludes the load generator. Background SQLite
+indexing can lag and skip already-pruned source blocks. Direct mode includes its
+INSERT/COMMIT work in the producer path; an open final batch is flushed at shutdown.
+These local transfer tests are neither
 order-book benchmarks nor sustained multi-validator consensus throughput.</p>
 <h2 id="8-remaining-optimization-targets-not-implemented">8. Remaining optimization targets (not implemented)</h2><p>See <a href="BYTE-PIPELINE-BENCHMARK.html">byte-pipeline measurements</a> for the current changes:
 allocation/copy reductions are implemented, but a stable TPS improvement is not established.</p>
@@ -252,8 +258,10 @@ Compare paired runs, CPU usage, allocations/live memory and commit latency as we
 <p>The EVM change set is applied in deterministic address order using a sorted contiguous
 vector instead of temporary B-tree nodes. Stable sorting and duplicate-key handling
 preserve the previous last-entry-wins behavior; storage slots are sorted before apply.
-RocksDB transaction keys retain their exact <code>tx/</code> plus 64 lowercase hex-byte format,
-but are now constructed in a 67-byte stack buffer rather than two heap strings.</p>
+That allocation optimization constructed the then-current <code>tx/</code> plus 64 lowercase
+hex-byte keys in a stack buffer. Chain schema 3 now writes <code>tx/</code> plus 32 raw hash
+bytes and an eight-byte height, while retaining reads of the earlier format; see
+<a href="STORAGE-MIGRATIONS.md">storage migrations</a>.</p>
 <p>Single-transaction Capnp RPC now reserves the same ordered admission queue as bulk
 RPC and runs verification on a blocking worker. It no longer performs GPU work while
 holding the node lock on the RPC executor. Mixed single/bulk requests preserve their
@@ -278,11 +286,12 @@ is explicit. Existing configuration values are preserved when loading old homes.
 Legacy Cap’n Proto configs remain readable and are preserved during JSONL migration.
 Genesis and chain/network data remain Cap’n Proto.</p>
 <p>RocksDB expires blocks and receipt indexes relative to the committed head timestamp.
-SQLite asynchronously removes rows older than RocksDB&#39;s earliest retained height,
-including transaction receipts, and expires indexed logs by wall-clock age.
+SQLite uses WAL and appends indexed blocks, transactions, receipts and logs without
+pruning them. Its history is independent of RocksDB retention; blocks pruned
+before indexing can still be skipped and are reported by the index cursor.
 Current state remains. Projection segments rotate at min(retention seconds, 60),
-so a partial boundary segment can retain up to one additional segment. SQLite
-reuses freed pages and RocksDB reclaims physical space during compaction.
+so a partial boundary segment can retain up to one additional segment. RocksDB
+reclaims physical space during compaction; SQLite history continues to grow.
 Raw diagnostic logs and benchmark reports have separate lifetimes; retention
 is not a total disk-size limit.</p>
 <h2 id="10-shared-hashes-and-bounded-block-reads-2026-10-22">10. Shared hashes and bounded block reads — 2026-10-22</h2><p>Block clones share their lazy Keccak cache as well as their immutable Cap&#39;n Proto

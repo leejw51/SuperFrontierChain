@@ -215,8 +215,6 @@ public keys. The existing 15 network emergency scenarios also run with GPU defau
 
 Reports retain executable/source hashes and per-trial CPU breakdowns:
 
-- [4,096-request batches](network-backends-batched-results-2026-10-20.jsonl)
-- [100-request batches](network-backends-results-2026-10-20.jsonl)
 - [GPU network emergencies](gpu-emergency-results-2026-10-20.json)
 
 ## Capnp v3 throughput tuning (2026-10-20)

@@ -93,7 +93,7 @@ const index = params => api('/dashboard/index',params);
 function renderIndex(s){indexStats=s;tween('transaction-total',s.indexedTransactions);text('index-lag',`SQLite ${s.journalMode.toUpperCase()} · indexed block ${fmt(s.indexedHeight)}`);properties($('index-details'),[
   ['Schema version',s.schemaVersion??'Unversioned'],['Journal mode',s.journalMode.toUpperCase()],['Indexed height',fmt(s.indexedHeight)],['Last sampled head',stats?fmt(stats.height):'—'],['Indexed transactions',fmt(s.indexedTransactions)],['Indexed logs',fmt(s.indexedLogs)],['Pruned blocks skipped',s.skippedPrunedBlocks],['Health',s.error||'Index available'],['Database',s.database]
 ]);}
-function renderStats(s){stats=s;tween('height',s.height);tween('tps',s.tps);tween('cpu',s.host?.cpuPercent,'%');text('head-age',`Head age ${Math.max(0,Math.floor(Date.now()/1000)-s.headTimestamp)}s · chain ${s.chainId}`);text('tps-window',`${fmt(s.windowTransactions)} txs / ${s.windowSeconds}s block window`);text('hero-backend',s.verification.backend.toUpperCase());text('engine-backend',s.verification.backend);text('gpu-records',fmt(s.verification.gpu_records));text('cpu-records',fmt(s.verification.cpu_records));text('pending',fmt(s.pendingTransactions));text('rayon',s.host?.rayonThreads??'—');text('block-interval',`Target ${s.targetBlockMs} ms`);document.querySelectorAll('[data-chain]').forEach(e=>e.textContent=s.chainId);
+function renderStats(s){stats=s;const sqliteOff=s.runtime?.sqliteIndexerEnabled===false;document.body.classList.toggle('sqlite-off',sqliteOff);if(sqliteOff&&currentPage!=='overview')showPage('overview');tween('height',s.height);const benchmark=s.benchmarkTps;const stressRun=s.stress?.['Node PID']===s.host?.processes?.[0]?.pid;tween('tps',benchmark?.tps??(stressRun?null:s.tps));tween('cpu',s.host?.cpuPercent,'%');text('head-age',`Head age ${Math.max(0,Math.floor(Date.now()/1000)-s.headTimestamp)}s · chain ${s.chainId}`);text('tps-window',benchmark?`Last completed round ${benchmark.trial} · ${fmt(benchmark.transactions)} txs / ${Number(benchmark.seconds).toFixed(3)}s · ${new Date(benchmark.timestamp*1000).toLocaleTimeString()} · signing excluded`:stressRun?'Waiting for the first completed stress round':`${fmt(s.windowTransactions)} txs / ${s.windowSeconds}s block window`);text('hero-backend',s.verification.backend.toUpperCase());text('engine-backend',s.verification.backend);text('gpu-records',fmt(s.verification.gpu_records));text('cpu-records',fmt(s.verification.cpu_records));text('pending',fmt(s.pendingTransactions));text('rayon',s.host?.rayonThreads??'—');text('block-interval',`Target ${s.targetBlockMs} ms`);document.querySelectorAll('[data-chain]').forEach(e=>e.textContent=s.chainId);
   $('latest-blocks').replaceChildren(blockTable(s.recentBlocks));
   const host=s.host||{};text('cpu-sample',host.sampleSeconds?`${host.sampleSeconds.toFixed(1)}s SAMPLE`:'SAMPLING');
   $('processes').replaceChildren(table(['Process','PID','CPU','Resident memory','OS threads'],(host.processes||[]).map(p=>[p.role,p.pid,p.cpuPercent==null?'Sampling…':p.cpuPercent.toFixed(1)+'%',(p.residentBytes/1048576).toFixed(1)+' MiB',p.osThreads??'Unavailable'])));
@@ -126,12 +126,54 @@ async function openDetail(kind,key){const version=++detailVersion,dialog=$('deta
 function route(){const hash=decodeURIComponent(location.hash.slice(1)||'overview');if(hash.startsWith('block/')||hash.startsWith('tx/')){const [kind,...rest]=hash.split('/');openDetail(kind,rest.join('/'));return;}detailVersion++;if($('detail-dialog').open)$('detail-dialog').close();showPage(hash);if(currentPage==='explorer'){if(!blockPickerLoaded)loadBlockPicker(!explorerRows.length&&!explorerQuery);else if(!explorerRows.length&&!selectedBlock)searchExplorer();}if(currentPage==='logs')searchLogs();}
 function closeDetail(){location.hash=currentPage;}
 async function searchLogs(more=false){const version=++logVersion;if(!more){logQuery=$('log-query').value.trim();logBefore=null;}$('logs-more').disabled=true;try{const result=await index({kind:'logs',q:logQuery,limit:50,...(more&&logBefore?{before:logBefore}:{})});if(version!==logVersion)return;renderIndex(result);if(!more)$('logs-results').replaceChildren();for(const row of result.rows){const d=element('details',null,'log-record'),summary=element('summary');summary.append(element('time',new Date(row.record.timestamp_ms).toLocaleString()),badge(row.record.level,row.record.level==='error'?'error':''),element('strong',row.record.event));d.append(summary,element('pre',formatRecord(row.record),'json'));d.addEventListener('toggle',()=>{if(d.open)$('live-logs').checked=false;});$('logs-results').append(d);}logBefore=result.rows.at(-1)?.id; $('logs-more').hidden=result.rows.length<50;text('log-status',`${fmt(result.indexedLogs)} indexed events · SQLite ${result.journalMode.toUpperCase()}`);if(!more&&!result.rows.length)empty($('logs-results'),'No matching events','Try an event name, level, or message word.');}catch{text('log-status','Log index unavailable · data may be stale');}finally{$('logs-more').disabled=false;}}
-async function refresh(){if(!document.hidden){try{const [s,t]=await Promise.all([api('/dashboard/stats'),index({kind:'transactions',limit:6})]);renderStats(s);renderIndex(t);if(t.rows.length)$('latest-transactions').replaceChildren(txTable(t.rows,true));else empty($('latest-transactions'),'No transactions yet','Transactions appear here once a block is indexed.');text('connection','● Node online');$('connection').classList.remove('stale');text('updated',`Updated ${new Date().toLocaleTimeString()} · every 2s`);if(currentPage==='logs'&&$('live-logs').checked&&!$('detail-dialog').open)await searchLogs();}catch{text('connection','Node unavailable');$('connection').classList.add('stale');text('updated','Connection lost · displayed data may be stale');}}setTimeout(refresh,2000);}
+function indexUnavailable(disabled=false) {
+  indexStats=null;
+  tween('transaction-total',null);
+  const title=disabled?'SQLite indexing is disabled':'SQLite index unavailable';
+  const message=disabled?'make stresstest runs with SQLite OFF. Use make stresstest2 for transaction search and indexed logs.':'The node is online, but indexed data is unavailable. Retrying automatically.';
+  text('index-lag',title);
+  properties($('index-details'),[['Status',title]]);
+  empty($('latest-transactions'),title,message);
+  if(disabled){
+    empty($('explorer-results'),title,message);
+    empty($('logs-results'),title,message);
+    text('block-picker-status',message);
+    text('log-status',title);
+  }
+}
+async function refresh(){
+  if(!document.hidden){
+    let online=false;
+    try{
+      const s=await api('/dashboard/stats');
+      renderStats(s);
+      online=true;
+      text('connection','● Node online');
+      $('connection').classList.remove('stale');
+      text('updated',`Updated ${new Date().toLocaleTimeString()} · every 2s`);
+    }catch{
+      text('connection','Node unavailable');
+      $('connection').classList.add('stale');
+      text('updated','Connection lost · displayed data may be stale');
+    }
+    if(online){
+      if(stats.runtime?.sqliteIndexerEnabled===false)indexUnavailable(true);
+      else try{
+        const t=await index({kind:'transactions',limit:6});
+        renderIndex(t);
+        if(t.rows.length)$('latest-transactions').replaceChildren(txTable(t.rows,true));
+        else empty($('latest-transactions'),'No transactions yet','Transactions appear here once a block is indexed.');
+        if(currentPage==='logs'&&$('live-logs').checked&&!$('detail-dialog').open)await searchLogs();
+      }catch{indexUnavailable();}
+    }
+  }
+  setTimeout(refresh,2000);
+}
 $('explorer-form').onsubmit=e=>{e.preventDefault();searchExplorer();};$('explorer-more').onclick=()=>searchExplorer(true);$('recent-txs').onclick=()=>goSearch('transactions');$('recent-blocks').onclick=()=>goSearch('blocks');$('browse-blocks').onclick=()=>goSearch('blocks');$('logs-form').onsubmit=e=>{e.preventDefault();$('live-logs').checked=false;searchLogs();};$('logs-more').onclick=()=>{$('live-logs').checked=false;searchLogs(true);};$('close-detail').onclick=closeDetail;$('detail-dialog').addEventListener('cancel',e=>{e.preventDefault();closeDetail();});$('detail-dialog').addEventListener('click',e=>{if(e.target===$('detail-dialog')&&e.clientX<$('detail-dialog').getBoundingClientRect().left)closeDetail();});addEventListener('hashchange',route);
 $('block-picker').onchange=e=>{if(e.target.value)selectBlock(e.target.value);};
 $('block-jump-form').onsubmit=e=>{e.preventDefault();selectBlock($('block-height').value.trim());};
 $('refresh-block-picker').onclick=()=>loadBlockPicker(!selectedBlock&&!explorerQuery);
 // Decorative Three.js orbit: bounded geometry, 20 FPS, no work in hidden tabs or other pages.
-function orbit(){const canvas=$('orbit');try{const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:false,powerPreference:'low-power'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(40,1,.1,30);camera.position.z=6;const group=new THREE.Group();const material=new THREE.LineBasicMaterial({color:0x9be2cb,transparent:true,opacity:.24});const geometry=new THREE.EdgesGeometry(new THREE.TorusGeometry(1.45,.22,8,60));group.add(new THREE.LineSegments(geometry,material));group.rotation.x=.9;group.rotation.z=-.4;scene.add(group);let last=0;const resize=new ResizeObserver(()=>{const w=canvas.clientWidth,h=canvas.clientHeight;if(w&&h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}});resize.observe(canvas);let frame;function draw(now){frame=requestAnimationFrame(draw);if(!motionOn||document.hidden||currentPage!=='overview'||$('detail-dialog').open||now-last<50)return;last=now;group.rotation.y=now*.00006;renderer.render(scene,camera);}frame=requestAnimationFrame(draw);addEventListener('pagehide',()=>{cancelAnimationFrame(frame);resize.disconnect();geometry.dispose();material.dispose();renderer.dispose();},{once:true});}catch{canvas.hidden=true;}}
+function orbit(){const canvas=$('orbit');try{const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:false,powerPreference:'low-power'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(40,1,.1,30);camera.position.z=6;const group=new THREE.Group();const material=new THREE.LineBasicMaterial({color:0x9be2cb,transparent:true,opacity:.24});const geometry=new THREE.EdgesGeometry(new THREE.TorusGeometry(1.45,.22,8,60));group.add(new THREE.LineSegments(geometry,material));group.rotation.x=.9;group.rotation.z=-.4;scene.add(group);let last=0;const resize=new ResizeObserver(()=>{const w=canvas.clientWidth,h=canvas.clientHeight;if(w&&h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}});resize.observe(canvas);let frame;function draw(now){frame=requestAnimationFrame(draw);if(stats?.runtime?.sqliteIndexerEnabled===false||!motionOn||document.hidden||currentPage!=='overview'||$('detail-dialog').open||now-last<50)return;last=now;group.rotation.y=now*.00006;renderer.render(scene,camera);}frame=requestAnimationFrame(draw);addEventListener('pagehide',()=>{cancelAnimationFrame(frame);resize.disconnect();geometry.dispose();material.dispose();renderer.dispose();},{once:true});}catch{canvas.hidden=true;}}
 function updateMotion(){text('motion-toggle',motionOn?'Motion on':'Motion off');$('motion-toggle').setAttribute('aria-pressed',String(motionOn));$('orbit').hidden=!motionOn;}
 $('motion-toggle').onclick=()=>{motionOn=!motionOn;updateMotion();};reduced.addEventListener('change',e=>{motionOn=!e.matches;updateMotion();});updateMotion();route();orbit();refresh();

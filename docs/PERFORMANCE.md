@@ -57,7 +57,8 @@ other SQLite connections. Tests cover direct error recovery, complete batch
 rollback/replay, explicit flush, shutdown flush, and restart. The comparison
 uses the same 256 MiB checkpoint trigger and 64 MiB cache.
 
-This corrected batching candidate has **not yet been performance-validated**.
+The corrected batching candidate was subsequently measured with 5-second
+retention in the checkpoint comparison below; it did not reach the target.
 An earlier batch trial was stopped after discovering redundant per-block
 SAVEPOINTs and premature empty-block commits; those have been removed. Its
 partial results are excluded from the completed-run comparisons. The sustained
@@ -67,7 +68,65 @@ Completed SQLite diagnostic runs are included in
 [sustained-tps-2026-10-24.csv](sustained-tps-2026-10-24.csv), with distinct
 `sqlite-append`, `sqlite-checkpoint`, `sqlite-rayon-queue` and `sqlite-direct`
 candidate names. `sqlite-direct` is the 10-round per-block COMMIT run, not the
-unmeasured batching candidate.
+later batching candidate.
+
+## Five-second retention and separate SQLite checkpoints (2026-10-24)
+
+Fresh homes, five rounds of 1,048,576 transfers, native MLX/GPU, 12 Rayon workers,
+10 ms blocks, direct SQLite batches (16 blocks / 8 MiB / 100 ms), SQLite WAL/NORMAL
+and synced RocksDB WAL. **SQLite rows are never pruned.** These shorter diagnostic
+runs do not replace the original long-run/60-second validation requirement.
+
+| Candidate | Aggregate TPS | Last round TPS | SQLite COMMIT time | Sampled peak WAL |
+| --- | ---: | ---: | ---: | ---: |
+| Corrected batches, automatic checkpoints | 41,062 | 28,136 | 84.743 s | Not sampled |
+| Separate PASSIVE checkpoints | 53,786 | 37,612 | 36.187 s | 26.436 GB |
+| Separate PASSIVE plus bounded-wait RESTART | 55,668 | 44,528 | 34.955 s | 2.480 GB |
+
+All three runs ended with 5,242,881 SQLite transactions (including funding), zero
+skipped blocks and zero indexing errors. A mid-run PASSIVE-only dashboard sample
+also showed zero retention cutoff lag and zero RocksDB background errors. This
+sparse sample is not a lag bound. Rates are total transfers / measured seconds;
+checkpoint time overlaps producer work and must not be added to elapsed time.
+Raw rounds: [sqlite-checkpoint-2026-10-24.csv](sqlite-checkpoint-2026-10-24.csv).
+
+Moving checkpoints alone improved this sequential comparison but allowed the WAL
+to grow throughout the PASSIVE-only run. The current direct writer checks the WAL
+every 250 ms after its physical file reaches 256 MiB, uses PASSIVE, and additionally
+attempts RESTART at approximately 512 MiB of active frames. RESTART waits up to
+250 ms for locks; its I/O can take longer and it can block the writer. The third
+run made 40 RESTART attempts, 19 of which reported busy. The measured peak is not
+a hard WAL limit, especially with long-lived readers. It still misses 200,000 TPS.
+
+The bundled SQLite engine was upgraded from 3.50.2 to 3.51.3 before introducing
+concurrent checkpointing, fixing SQLite's documented
+[WAL-reset race](https://sqlite.org/wal.html#the_wal_reset_bug). Thus this is a
+candidate comparison, not an isolated estimate of thread placement alone.
+INSERT/COMMIT remain on the node thread. Shutdown joins the checkpoint worker;
+an exited worker restores automatic checkpoints at the next flush and exposes a
+health error. Tests cover an active reader snapshot, concurrent inserts, checkpoint
+progress, exact rows after restart and SQLite integrity. Further investigation is
+needed into per-transaction index writes and late-run throughput.
+
+A separate SQL-only layout probe copied the first 2,000,000 existing transaction
+rows into fresh databases using `INSERT ... SELECT` (Python's SQLite **3.54.0**,
+WAL/NORMAL, 64 MiB cache, 256 MiB autocheckpoint unless specified). It excludes
+signature verification, RPC, RocksDB, Rust row preparation and migration cost;
+its rates are **not committed-chain TPS**. Timing includes INSERT, COMMIT and a
+final checkpoint, but excludes setup, row-count verification and `quick_check`.
+
+| Experimental layout | Rows/transaction | SQL-only rows/s |
+| --- | ---: | ---: |
+| Existing TEXT hash/address columns and indexes | 16,000 | 70,462 |
+| BLOB hash/address columns, same indexes | 16,000 | 110,484 |
+| BLOB rows clustered by (height, position), full hash index | 128,000 | 212,309 |
+| Same clustered rows, nonunique 8-byte hash-prefix index | 128,000 | 293,932 |
+| Same prefix candidate, 512 MiB cache | 128,000 | 299,180 |
+
+The prefix candidate would require full-hash collision checks and exact query
+semantics before adoption. These schema variants are **not implemented in the
+node**. Smaller 1 KiB pages regressed in this probe and were rejected. Raw results:
+[sqlite-layout-probe-2026-10-24.csv](sqlite-layout-probe-2026-10-24.csv).
 
 ## SQLite append-only and asynchronous writer investigation (2026-10-24)
 

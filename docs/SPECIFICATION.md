@@ -186,10 +186,14 @@ conformance claim. See [compatibility details](ETHEREUM.md).
 
 ## 7. Stress defaults and interpretation
 
-`make stresstest`: release build, one sequencer, native MLX GPU, SQLite ON, Capnp TCP,
+`make stresstest`: release build, one sequencer, native MLX GPU, SQLite OFF, Capnp TCP,
 12 Rayon workers, 4,096-entry batches, one in-flight batch, 10 ms block scheduling,
 1,048,576 transactions per round. Runs until `make stop` or Ctrl-C. Startup prints
-URLs and persistence paths. Home: `~/.superfrontierchain/stress`; old homes are preserved.
+URLs and persistence paths. Home: `~/.superfrontierchain/stress`; existing homes are reused.
+Stress runs set a 5-second block retention window, including on reused homes;
+`STRESS_RETENTION_SECONDS` overrides it. `make stresstest2` enables direct SQLite
+writes with atomic batches; SQLite rows are never pruned. Ordinary node retention
+still defaults to 60 seconds.
 
 Python supervises the build and Rust runner lifecycle; no benchmark computation or
 GPU execution runs in Python. `make stressstart` starts the same workload in the
@@ -203,8 +207,10 @@ other repository blockchain processes are running.
 
 TPS counts committed transfers and includes signature verification, EVM execution,
 Merkle updates and durable commits. Fixture signing is outside the timed interval.
-Node CPU uses 100% per core and excludes the load generator. SQLite catches up
-asynchronously and is checked after timing. These local transfer tests are neither
+Node CPU uses 100% per core and excludes the load generator. Background SQLite
+indexing can lag and skip already-pruned source blocks. Direct mode includes its
+INSERT/COMMIT work in the producer path; an open final batch is flushed at shutdown.
+These local transfer tests are neither
 order-book benchmarks nor sustained multi-validator consensus throughput.
 
 ## 8. Remaining optimization targets (not implemented)

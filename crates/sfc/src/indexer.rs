@@ -167,8 +167,9 @@ fn step(
     if !changed {
         return Ok(false);
     }
-    // Bounded by the snapshot batch; prepare before opening the SQLite write
-    // transaction. The dedicated pool never runs SQL or shares a Connection.
+    // Bounded by the snapshot batch. Background mode prepares before opening
+    // its transaction; direct mode already owns a bounded outer transaction.
+    // The dedicated pool never runs SQL or shares a Connection.
     let prepare_start = std::time::Instant::now();
     let prepared: Vec<PreparedBlock> =
         preparation.install(|| blocks.par_iter().map(prepare_block).collect::<Result<_>>())?;
@@ -261,9 +262,138 @@ struct WriteMetrics {
     max_commit_us: u128,
     rocksdb_commit_us: u128,
     errors: u64,
+    checkpoint_fallbacks: u64,
 }
 
-/// Diagnostic/direct mode: owned by Node, with no block-job queue or SQLite thread.
+#[derive(Default, serde::Serialize)]
+struct CheckpointMetrics {
+    checkpoints: u64,
+    checkpoint_us: u128,
+    max_checkpoint_us: u128,
+    peak_wal_bytes: u64,
+    wal_frames: i64,
+    checkpointed_frames: i64,
+    restart_attempts: u64,
+    busy_restarts: u64,
+}
+impl CheckpointMetrics {
+    fn save(&self, data: &Path) {
+        if let Ok(bytes) = serde_json::to_vec(self) {
+            let temporary = data.join("sqlite-checkpoint-profile.json.tmp");
+            if std::fs::write(&temporary, bytes).is_ok() {
+                let _ = std::fs::rename(temporary, data.join("sqlite-checkpoint-profile.json"));
+            }
+        }
+    }
+}
+
+// Only checkpoint I/O runs here. INSERTs and COMMITs stay on the node thread.
+struct Checkpointer {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+impl Checkpointer {
+    fn start(data: &Path, threshold: u64) -> Result<Self> {
+        // Earlier bundled versions have a documented concurrent WAL-reset race.
+        ensure!(
+            rusqlite::version_number() >= 3_051_003,
+            "checkpoint worker requires SQLite 3.51.3 or newer"
+        );
+        let db = Connection::open_with_flags(
+            data.join("index.sqlite"),
+            OpenFlags::SQLITE_OPEN_READ_WRITE,
+        )?;
+        db.busy_timeout(Duration::from_millis(250))?;
+        db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint=0;")?;
+        let page_size: u64 = db.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+        let restart_frames = threshold.saturating_mul(2) / (page_size + 24);
+        let data = data.to_owned();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        let thread = thread::Builder::new()
+            .name("sfc-sqlite-checkpoint".into())
+            .spawn(move || {
+                let mut metrics = CheckpointMetrics::default();
+                while !stopping.load(Ordering::Acquire) {
+                    let bytes = std::fs::metadata(data.join("index.sqlite-wal"))
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    metrics.peak_wal_bytes = metrics.peak_wal_bytes.max(bytes);
+                    if bytes >= threshold {
+                        let started = std::time::Instant::now();
+                        // PASSIVE never waits for readers or the writer to finish.
+                        // A reader can still delay WAL recycling, as with autocheckpoint.
+                        let result = (|| -> rusqlite::Result<(i64, i64)> {
+                            let (frames, done) =
+                                db.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
+                                    Ok((row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+                                })?;
+                            if frames > 0 && frames as u64 >= restart_frames {
+                                // Continuous writes can prevent PASSIVE from recycling
+                                // the WAL. Bound lock waiting, then retry on the next pass.
+                                // RESTART can briefly block the writer; it does not prune rows.
+                                metrics.restart_attempts += 1;
+                                let (busy, frames, done) =
+                                    db.query_row("PRAGMA wal_checkpoint(RESTART)", [], |row| {
+                                        Ok((
+                                            row.get::<_, i64>(0)?,
+                                            row.get::<_, i64>(1)?,
+                                            row.get::<_, i64>(2)?,
+                                        ))
+                                    })?;
+                                metrics.busy_restarts += u64::from(busy != 0);
+                                Ok((frames, done))
+                            } else {
+                                Ok((frames, done))
+                            }
+                        })();
+                        match result {
+                            Ok((frames, done)) => {
+                                let elapsed = started.elapsed().as_micros();
+                                metrics.checkpoints += 1;
+                                metrics.checkpoint_us += elapsed;
+                                metrics.max_checkpoint_us = metrics.max_checkpoint_us.max(elapsed);
+                                metrics.wal_frames = frames;
+                                metrics.checkpointed_frames = done;
+                                metrics.save(&data);
+                                let _ = std::fs::remove_file(data.join("checkpoint-error.log"));
+                            }
+                            Err(error) => {
+                                let _ = std::fs::write(
+                                    data.join("checkpoint-error.log"),
+                                    format!("{error:#}\n"),
+                                );
+                                // The producer detects termination and restores autocheckpoint.
+                                break;
+                            }
+                        }
+                    }
+                    thread::park_timeout(Duration::from_millis(250));
+                }
+                metrics.save(&data);
+            })?;
+        Ok(Self {
+            stop,
+            thread: Some(thread),
+        })
+    }
+    fn finished(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_none_or(|thread| thread.is_finished())
+    }
+}
+impl Drop for Checkpointer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            thread.thread().unpark();
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Direct mode: owned by Node, with no block-job queue or separate INSERT thread.
 /// A failed SQLite write does not undo an already durable chain commit; its cursor
 /// retries on the next call and index-error.log exposes the failure.
 pub struct DirectWriter {
@@ -275,6 +405,7 @@ pub struct DirectWriter {
     pending_blocks: u64,
     pending_bytes: u64,
     pending_since: std::time::Instant,
+    checkpoint: Option<Checkpointer>,
 }
 impl DirectWriter {
     pub fn open(data: PathBuf, store: &crate::storage::Store, batch_blocks: usize) -> Result<Self> {
@@ -294,6 +425,7 @@ impl DirectWriter {
             pending_blocks: 0,
             pending_bytes: 0,
             pending_since: std::time::Instant::now(),
+            checkpoint: None,
         };
         while step(
             &mut writer.db,
@@ -302,6 +434,8 @@ impl DirectWriter {
             &writer.preparation,
             None,
         )? {}
+        writer.checkpoint = Some(Checkpointer::start(&writer.data, 256 * 1024 * 1024)?);
+        writer.db.execute_batch("PRAGMA wal_autocheckpoint=0;")?;
         Ok(writer)
     }
     pub(crate) fn record(&mut self, store: &crate::storage::Store, rocksdb: std::time::Duration) {
@@ -348,6 +482,18 @@ impl DirectWriter {
         }
     }
     pub(crate) fn flush(&mut self) -> Result<()> {
+        if self.checkpoint.as_ref().is_some_and(Checkpointer::finished) {
+            self.checkpoint.take();
+            self.db.execute_batch("PRAGMA wal_autocheckpoint=65536;")?;
+            self.metrics.checkpoint_fallbacks += 1;
+            let health = self.data.join("checkpoint-error.log");
+            if !health.exists() {
+                let _ = std::fs::write(
+                    health,
+                    "checkpoint worker exited; automatic checkpoints restored\n",
+                );
+            }
+        }
         if !self.db.is_autocommit() {
             let started = std::time::Instant::now();
             self.db.execute_batch("COMMIT")?;
@@ -376,6 +522,8 @@ impl Drop for DirectWriter {
             let _ = std::fs::write(self.data.join("index-error.log"), format!("{error:#}\n"));
         }
         self.save_metrics();
+        // Join the separate connection before the final checkpoint on the writer.
+        self.checkpoint.take();
         let _ = self.db.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");
     }
 }
@@ -594,8 +742,116 @@ pub fn search(data: &Path, query: &Query) -> Result<Value> {
         "indexedTransactions":meta(&db,"transactions")?,"indexedLogs":meta(&db,"logs")?,
         "skippedPrunedBlocks":meta(&db,"skipped_blocks")?,
         "journalMode":db.query_row("PRAGMA journal_mode",[],|r|r.get::<_,String>(0))?,
-        "error":std::fs::read_to_string(data.join("index-error.log")).ok(),
+        "error":std::fs::read_to_string(data.join("index-error.log")).ok()
+            .or_else(|| std::fs::read_to_string(data.join("checkpoint-error.log")).ok()),
         "database":data.join("index.sqlite")});
     db.execute_batch("COMMIT")?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+
+    #[test]
+    fn stopped_checkpoint_worker_restores_automatic_checkpoints() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path();
+        let genesis = crate::types::Genesis {
+            chain_id: 7777,
+            timestamp: 1_000_000,
+            gas_limit: 30_000_000,
+            alloc: Default::default(),
+        };
+        let store =
+            crate::storage::Store::open(data, crate::config::Retention::Archive, &genesis).unwrap();
+        let mut writer = DirectWriter::open(data.to_owned(), &store, 16).unwrap();
+        let worker = writer.checkpoint.as_ref().unwrap();
+        worker.stop.store(true, Ordering::Release);
+        worker.thread.as_ref().unwrap().thread().unpark();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !worker.finished() {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+        writer.db.execute_batch("CREATE TABLE checkpoint_probe(id INTEGER); BEGIN IMMEDIATE; INSERT INTO checkpoint_probe VALUES(42);").unwrap();
+        writer.flush().unwrap();
+        assert!(writer.db.is_autocommit());
+        assert_eq!(
+            writer
+                .db
+                .query_row("PRAGMA wal_autocheckpoint", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            65536
+        );
+        assert_eq!(
+            writer
+                .db
+                .query_row("SELECT id FROM checkpoint_probe", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            42
+        );
+        assert_eq!(writer.metrics.checkpoint_fallbacks, 1);
+        assert!(data.join("checkpoint-error.log").exists());
+    }
+
+    #[test]
+    fn checkpoint_worker_preserves_reader_snapshot_and_committed_rows() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path();
+        let mut writer = open_writer(&data.join("index.sqlite")).unwrap();
+        writer.execute_batch("PRAGMA wal_autocheckpoint=0; CREATE TABLE checkpoint_probe(id INTEGER PRIMARY KEY, payload BLOB); INSERT INTO checkpoint_probe VALUES(0,zeroblob(4096));").unwrap();
+        let reader = Connection::open(data.join("index.sqlite")).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        let count = |db: &Connection| {
+            db.query_row("SELECT count(*) FROM checkpoint_probe", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(count(&reader), 1);
+        let worker = Checkpointer::start(data, 1).unwrap();
+        for i in 1..=100 {
+            let tx = writer.transaction().unwrap();
+            tx.execute(
+                "INSERT INTO checkpoint_probe VALUES(?1,zeroblob(4096))",
+                [i],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !data.join("sqlite-checkpoint-profile.json").exists() {
+            assert!(!worker.finished(), "checkpoint worker terminated");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "checkpoint worker made no progress"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(count(&reader), 1);
+        assert_eq!(count(&writer), 101);
+        reader.execute_batch("COMMIT").unwrap();
+        drop(reader);
+        drop(worker);
+        writer
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .unwrap();
+        drop(writer);
+        let reopened = Connection::open(data.join("index.sqlite")).unwrap();
+        assert_eq!(count(&reopened), 101);
+        assert_eq!(
+            reopened
+                .query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        let metrics: Value = serde_json::from_slice(
+            &std::fs::read(data.join("sqlite-checkpoint-profile.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(metrics["checkpoints"].as_u64().unwrap() > 0);
+        assert!(!data.join("checkpoint-error.log").exists());
+    }
 }

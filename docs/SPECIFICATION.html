@@ -211,10 +211,14 @@ eth_getTransactionByHash, filters/subscriptions, tracing, full block transaction
 objects, historical account state and Ethereum MPT proofs. Unknown methods return
 method-not-found. Cronos-level tooling compatibility is a goal, not a completed
 conformance claim. See <a href="ETHEREUM.html">compatibility details</a>.</p>
-<h2 id="7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</h2><p><code>make stresstest</code>: release build, one sequencer, native MLX GPU, SQLite ON, Capnp TCP,
+<h2 id="7-stress-defaults-and-interpretation">7. Stress defaults and interpretation</h2><p><code>make stresstest</code>: release build, one sequencer, native MLX GPU, SQLite OFF, Capnp TCP,
 12 Rayon workers, 4,096-entry batches, one in-flight batch, 10 ms block scheduling,
 1,048,576 transactions per round. Runs until <code>make stop</code> or Ctrl-C. Startup prints
-URLs and persistence paths. Home: <code>~/.superfrontierchain/stress</code>; old homes are preserved.</p>
+URLs and persistence paths. Home: <code>~/.superfrontierchain/stress</code>; existing homes are reused.
+Stress runs set a 5-second block retention window, including on reused homes;
+<code>STRESS_RETENTION_SECONDS</code> overrides it. <code>make stresstest2</code> enables direct SQLite
+writes with atomic batches; SQLite rows are never pruned. Ordinary node retention
+still defaults to 60 seconds.</p>
 <p>Python supervises the build and Rust runner lifecycle; no benchmark computation or
 GPU execution runs in Python. <code>make stressstart</code> starts the same workload in the
 background. Supervisor output is appended to <code>~/.superfrontierchain/supervisor/stress.log</code>. Duplicate
@@ -226,8 +230,10 @@ State directories are retained. Test with <code>make test-stress-supervisor</cod
 other repository blockchain processes are running.</p>
 <p>TPS counts committed transfers and includes signature verification, EVM execution,
 Merkle updates and durable commits. Fixture signing is outside the timed interval.
-Node CPU uses 100% per core and excludes the load generator. SQLite catches up
-asynchronously and is checked after timing. These local transfer tests are neither
+Node CPU uses 100% per core and excludes the load generator. Background SQLite
+indexing can lag and skip already-pruned source blocks. Direct mode includes its
+INSERT/COMMIT work in the producer path; an open final batch is flushed at shutdown.
+These local transfer tests are neither
 order-book benchmarks nor sustained multi-validator consensus throughput.</p>
 <h2 id="8-remaining-optimization-targets-not-implemented">8. Remaining optimization targets (not implemented)</h2><p>See <a href="BYTE-PIPELINE-BENCHMARK.html">byte-pipeline measurements</a> for the current changes:
 allocation/copy reductions are implemented, but a stable TPS improvement is not established.</p>

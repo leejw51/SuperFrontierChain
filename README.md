@@ -357,9 +357,19 @@ add memory proportional to this bounded batch; SQL connections are never shared
 with Rayon workers. Blocks and the pruning boundary are read from one RocksDB
 snapshot without holding the execution mutex. Rows and cursors roll back together on failure. The height and transaction count
 are updated once per batch; the writer does not scan or delete expired SQLite rows.
-The writer page cache targets 64 MiB. Automatic WAL checkpoints run at 65,536
-pages, approximately 256 MiB with default SQLite pages. This is a checkpoint trigger, not a hard size limit: long-lived
-readers can delay reclamation. History projection sync runs on segment close and
+The writer page cache targets 64 MiB. In background mode, automatic WAL checkpoints
+run at 65,536 pages, approximately 256 MiB with default SQLite pages. Direct mode
+keeps INSERT/COMMIT on the producer and uses a separate connection/thread for
+PASSIVE checkpoints, checking the WAL file every 250 ms once it reaches 256 MiB.
+At roughly 512 MiB of active WAL frames it also attempts RESTART to permit WAL
+reuse during continuous writes. Lock waiting is limited to 250 ms per attempt;
+checkpoint I/O itself can take longer and RESTART can briefly block the writer.
+`sqlite-checkpoint-profile.json` records checkpoint timing and sampled peak WAL
+size. An exited worker restores automatic checkpoints at the next flush;
+`checkpoint-error.log` records checkpoint errors. Shutdown joins the worker before
+the final checkpoint. Bundled SQLite 3.51.3 fixes the concurrent WAL-reset race.
+Neither trigger is a hard WAL size limit: long-lived readers or sustained writes
+can delay reclamation. History projection sync runs on segment close and
 clean shutdown; the authoritative RocksDB WAL still syncs every block.
 
 Performance measurements and limits are in [PERFORMANCE.md](docs/PERFORMANCE.md).
